@@ -124,7 +124,7 @@ fn wrap_word_chunks(
         return vec![(0, 0)];
     }
 
-    let mut out = Vec::new();
+    let mut out: Vec<(usize, usize)> = Vec::new();
     let mut i = 0usize;
     let mut seg_start = chunks[0].start;
     let mut seg_end = seg_start;
@@ -136,8 +136,22 @@ fn wrap_word_chunks(
             seg_start = chunk.start;
         }
 
-        let chunk_width = display_width_from(chunk_text(line, chunk), seg_width, tab_len, mask);
-        if seg_width + chunk_width <= width {
+        let text = chunk_text(line, chunk);
+        let chunk_width = display_width_from(text, seg_width, tab_len, mask);
+        // Whitespace at a break hangs at the end of the row before it, past the right edge if need be, so that a row
+        // never starts with the space that separates it from the previous one
+        let is_space = text.chars().all(char::is_whitespace);
+        if is_space && seg_end == seg_start {
+            if let Some(prev) = out.last_mut().filter(|prev| prev.1 == chunk.start) {
+                prev.1 = chunk.end;
+                i += 1;
+                seg_start = chunk.end;
+                seg_end = chunk.end;
+                continue;
+            }
+        }
+
+        if seg_width + chunk_width <= width || (is_space && seg_end > seg_start) {
             seg_end = chunk.end;
             seg_width += chunk_width;
             i += 1;
@@ -310,6 +324,35 @@ mod tests {
         let have = masked_segments("a中\tcde", WrapMode::Glyph, 4, '*');
         assert_eq!(have, vec!["a中\tc", "de"]);
         let have = masked_segments("ab cd", WrapMode::Word, 4, '＊');
-        assert_eq!(have, vec!["ab", " ", "cd"]);
+        assert_eq!(have, vec!["ab ", "cd"]);
+    }
+
+    #[test]
+    fn word_wrap_hangs_whitespace_at_a_break_on_the_row_before() {
+        for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+            let have = segments("aaaa bbbb cccc", mode, 4);
+            assert_eq!(have, vec!["aaaa ", "bbbb ", "cccc"], "{mode:?}");
+
+            let have = segments("aa   bb", mode, 2);
+            assert_eq!(have, vec!["aa   ", "bb"], "{mode:?}");
+
+            let have = segments("aa \t bb", mode, 3);
+            assert_eq!(have, vec!["aa \t ", "bb"], "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn word_wrap_hangs_whitespace_after_a_long_word() {
+        let have = segments("helloworld x", WrapMode::Word, 4);
+        assert_eq!(have, vec!["helloworld ", "x"]);
+
+        let have = segments("helloworld x", WrapMode::WordOrGlyph, 4);
+        assert_eq!(have, vec!["hell", "owor", "ld ", "x"]);
+    }
+
+    #[test]
+    fn word_wrap_keeps_leading_whitespace_of_a_line() {
+        let have = segments("    ab", WrapMode::Word, 2);
+        assert_eq!(have, vec!["    ", "ab"]);
     }
 }

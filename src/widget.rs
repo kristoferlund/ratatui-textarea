@@ -159,6 +159,33 @@ impl<'a> TextArea<'a> {
         }
         next_scroll_top(prev_top, cursor, width)
     }
+
+    // A wrapped row can run past the right edge: whitespace at a break hangs there, and so does the cursor at the end
+    // of a line that fills its last row. A cursor out there is drawn in the last cell of its row instead.
+    fn draw_cursor_past_right_edge(&self, area: Rect, top_row: u16, buf: &mut Buffer) {
+        if self.wrap_mode() == WrapMode::None
+            || self.alignment() != Alignment::Left
+            || area.width == 0
+        {
+            return;
+        }
+        let cursor = self.screen_cursor();
+        let col = cursor.col + usize::from(self.line_number_width());
+        let Some(row) = cursor.row.checked_sub(top_row.into()) else {
+            return;
+        };
+        if col < usize::from(area.width) || row >= usize::from(area.height) {
+            return;
+        }
+
+        let y = area.y + row as u16;
+        let mut x = area.right() - 1;
+        // When the last cell is the right half of a wide character, the cursor goes on the whole character
+        if x > area.x && buf[(x - 1, y)].symbol().width() > 1 {
+            x -= 1;
+        }
+        buf[(x, y)].set_style(self.cursor_style);
+    }
 }
 
 impl Widget for &TextArea<'_> {
@@ -176,7 +203,8 @@ impl Widget for &TextArea<'_> {
         }
 
         let (prev_top_row, prev_top_col) = self.viewport.scroll_top();
-        let (text, top_row, top_col) = if self.is_empty() && !self.placeholder.lines.is_empty() {
+        let placeholder_shown = self.is_empty() && !self.placeholder.lines.is_empty();
+        let (text, top_row, top_col) = if placeholder_shown {
             let mut placeholder = self.placeholder.clone();
             let cursor = Span::styled(" ", self.cursor_style);
             if let Some(first_line) = placeholder.lines.first_mut() {
@@ -213,6 +241,9 @@ impl Widget for &TextArea<'_> {
         self.viewport.store(top_row, top_col, width, height);
 
         inner.render(text_area, buf);
+        if !placeholder_shown {
+            self.draw_cursor_past_right_edge(text_area, top_row, buf);
+        }
     }
 }
 
