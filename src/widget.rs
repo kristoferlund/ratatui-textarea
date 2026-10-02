@@ -4,7 +4,7 @@ use crate::wrap::WrapMode;
 #[cfg(feature = "portable-atomic")]
 use portable_atomic::{AtomicU64, Ordering};
 use ratatui_core::buffer::Buffer;
-use ratatui_core::layout::{Alignment, Rect};
+use ratatui_core::layout::Rect;
 use ratatui_core::text::{Line, Span, Text};
 use ratatui_core::widgets::Widget;
 use ratatui_widgets::paragraph::Paragraph;
@@ -125,12 +125,10 @@ impl<'a> TextArea<'a> {
     }
 
     // A wrapped row can run past the right edge: whitespace at a break hangs there, and so does the cursor at the end
-    // of a line that fills its last row. A cursor out there is drawn in the last cell of its row instead.
+    // of a line that fills its last row. A cursor out there is drawn in the last cell of its row instead. A row that
+    // overflows is drawn from the left edge under every alignment, so its last cell is the last cell of the area.
     fn draw_cursor_past_right_edge(&self, area: Rect, top_row: u16, buf: &mut Buffer) {
-        if self.wrap_mode() == WrapMode::None
-            || self.alignment() != Alignment::Left
-            || area.width == 0
-        {
+        if self.wrap_mode() == WrapMode::None || area.width == 0 {
             return;
         }
         let cursor = self.screen_cursor();

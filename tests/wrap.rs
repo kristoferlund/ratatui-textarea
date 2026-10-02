@@ -1,5 +1,5 @@
 use ratatui_core::buffer::Buffer;
-use ratatui_core::layout::Rect;
+use ratatui_core::layout::{Alignment, Rect};
 use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::widgets::Widget as _;
 use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
@@ -516,6 +516,28 @@ fn word_wrap_cursor_on_a_hung_space_stays_on_its_row() {
     assert_eq!(textarea.cursor(), (0, 10));
     let buf = render_buffer(&textarea, 4, 4);
     assert_eq!(cursor_cells(&buf), [(0, 2)]);
+}
+
+#[test]
+fn word_wrap_cursor_past_the_right_edge_is_drawn_under_every_alignment() {
+    for alignment in [Alignment::Left, Alignment::Center, Alignment::Right] {
+        let mut textarea = TextArea::from(["aaaa bbbb"]);
+        textarea.set_wrap_mode(WrapMode::Word);
+        textarea.set_alignment(alignment);
+
+        // An overflowing row is drawn from the left edge whatever the alignment, so the cursor on the space hung past
+        // the right edge goes in the last cell of the row
+        textarea.move_cursor(CursorMove::Jump(0, 4));
+        let lines = render_lines(&textarea, 4, 3);
+        assert_eq!(lines, ["aaaa", "bbbb", "    "], "{alignment:?}");
+        let buf = render_buffer(&textarea, 4, 3);
+        assert_eq!(cursor_cells(&buf), [(3, 0)], "{alignment:?}");
+
+        // So does the cursor at the end of a line that fills its last row
+        textarea.move_cursor(CursorMove::End);
+        let buf = render_buffer(&textarea, 4, 3);
+        assert_eq!(cursor_cells(&buf), [(3, 1)], "{alignment:?}");
+    }
 }
 
 #[test]
