@@ -1794,6 +1794,49 @@ fn test_screen_to_data_follows_a_soft_wrapped_line() {
 }
 
 #[test]
+fn test_screen_to_data_clamps_a_column_past_a_wrapped_row_to_that_row() {
+    let mut textarea = TextArea::from(["aaaabbbb"]);
+    textarea.set_wrap_mode(WrapMode::Glyph);
+    rendered(&textarea, 4, 4);
+    assert_eq!(
+        textarea.screen_to_data(0, 99),
+        DataCursor(0, 3),
+        "right of a row that is not the last of its line lands on its last character, not on the next row"
+    );
+    assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 8));
+
+    let mut textarea = TextArea::from(["ab cd"]);
+    textarea.set_wrap_mode(WrapMode::Word);
+    rendered(&textarea, 4, 4);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 2));
+
+    // The last character of the row is a whole grapheme cluster
+    let mut textarea = TextArea::from(["xa\u{301}bc"]);
+    textarea.set_wrap_mode(WrapMode::Glyph);
+    rendered(&textarea, 2, 4);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 1));
+}
+
+#[test]
+fn test_screen_to_data_does_not_split_a_grapheme_cluster() {
+    let textarea = TextArea::from(["a\u{301}b c"]);
+    rendered(&textarea, 16, 4);
+
+    assert_eq!(textarea.screen_to_data(0, 0), DataCursor(0, 0), "a\u{301}");
+    assert_eq!(textarea.screen_to_data(0, 1), DataCursor(0, 2), "b");
+    assert_eq!(textarea.screen_to_data(0, 3), DataCursor(0, 4), "c");
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 5));
+
+    let textarea = TextArea::from(["e\u{301}\u{302}"]);
+    rendered(&textarea, 16, 4);
+    assert_eq!(
+        textarea.screen_to_data(0, 1),
+        DataCursor(0, 3),
+        "the end of a line that ends in combining marks is after them"
+    );
+}
+
+#[test]
 fn test_line_number_width_covers_digits_and_margins() {
     let mut textarea: TextArea = (1..=100).map(|i| i.to_string()).collect();
     assert_eq!(
@@ -1992,6 +2035,22 @@ fn test_mask_takes_its_own_width() {
     // A full-width mask char, the cell it spills into, then the cursor
     assert_eq!(rows, ["＊  "]);
     assert_eq!(textarea.scroll_offset(), (0, 4));
+}
+
+#[test]
+fn test_mask_hit_tests_every_masked_char() {
+    // A combining mark is drawn as a mask char of its own, so the hit test steps over chars, not grapheme clusters
+    let mut textarea = TextArea::from(["a\u{301}b"]);
+    textarea.set_mask_char('*');
+    let rows = rendered_rows(&textarea, 5, 1);
+    assert_eq!(rows, ["***  "]);
+    assert_eq!(textarea.screen_to_data(0, 1), DataCursor(0, 1));
+    assert_eq!(textarea.screen_to_data(0, 2), DataCursor(0, 2));
+
+    textarea.set_wrap_mode(WrapMode::Glyph);
+    let rows = rendered_rows(&textarea, 2, 2);
+    assert_eq!(rows, ["**", "* "]);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 1));
 }
 
 fn render_buffer(textarea: &TextArea<'_>, width: u16, height: u16) -> Buffer {
