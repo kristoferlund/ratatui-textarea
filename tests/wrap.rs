@@ -1,8 +1,8 @@
 use ratatui_core::buffer::Buffer;
 use ratatui_core::layout::Rect;
-use ratatui_core::style::{Color, Style};
+use ratatui_core::style::{Color, Modifier, Style};
 use ratatui_core::widgets::Widget as _;
-use ratatui_textarea::{CursorMove, TextArea, WrapMode};
+use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 
 fn render_lines(textarea: &TextArea<'_>, width: u16, height: u16) -> Vec<String> {
     let area = Rect {
@@ -144,7 +144,7 @@ fn word_and_word_or_glyph_differ_for_long_words() {
         vec![
             "alpha     ".to_string(),
             "supercalif".to_string(),
-            " omega    ".to_string(),
+            "omega     ".to_string(),
             "          ".to_string(),
         ]
     );
@@ -160,7 +160,7 @@ fn word_and_word_or_glyph_differ_for_long_words() {
             "ragilistic".to_string(),
             "expialidoc".to_string(),
             "ious      ".to_string(),
-            " omega    ".to_string(),
+            "omega     ".to_string(),
         ]
     );
 }
@@ -455,4 +455,114 @@ fn wrapped_cursor_three_visual_lines_from_one_logical() {
     assert_eq!(textarea.cursor(), (0, 5));
     textarea.move_cursor(CursorMove::Up);
     assert_eq!(textarea.cursor(), (0, 0));
+}
+
+fn cursor_cells(buf: &Buffer) -> Vec<(u16, u16)> {
+    let area = buf.area;
+    (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|&pos| buf[pos].modifier.contains(Modifier::REVERSED))
+        .collect()
+}
+
+#[test]
+fn word_wrap_hangs_the_space_after_a_word_that_fills_the_row() {
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        let mut textarea = TextArea::from(["aaaa bbbb cccc"]);
+        textarea.set_wrap_mode(mode);
+        let lines = render_lines(&textarea, 4, 4);
+        assert_eq!(lines, ["aaaa", "bbbb", "cccc", "    "], "{mode:?}");
+    }
+}
+
+#[test]
+fn word_wrap_does_not_start_a_row_with_the_space_after_a_long_word() {
+    let mut textarea = TextArea::from(["ab abcdef cd"]);
+    textarea.set_wrap_mode(WrapMode::Word);
+    let lines = render_lines(&textarea, 4, 4);
+    assert_eq!(lines, ["ab  ", "abcd", "cd  ", "    "]);
+
+    textarea.set_wrap_mode(WrapMode::WordOrGlyph);
+    let lines = render_lines(&textarea, 4, 4);
+    assert_eq!(lines, ["ab  ", "abcd", "ef  ", "cd  "]);
+}
+
+#[test]
+fn word_wrap_cursor_on_a_hung_space_stays_on_its_row() {
+    let mut textarea = TextArea::from(["aaaa bbbb cccc"]);
+    textarea.set_wrap_mode(WrapMode::Word);
+    render(&textarea, 4, 4);
+
+    // The space after the first word hangs past the right edge of the first row.
+    // The cursor on it belongs to that row, and is drawn in its last cell.
+    textarea.move_cursor(CursorMove::Jump(0, 4));
+    let screen = textarea.screen_cursor();
+    assert_eq!((screen.row, screen.col), (0, 4));
+    assert_eq!(textarea.screen_to_data(0, 4), DataCursor(0, 4));
+    assert_eq!(textarea.screen_to_data(1, 0), DataCursor(0, 5));
+    let buf = render_buffer(&textarea, 4, 4);
+    assert_eq!(cursor_cells(&buf), [(3, 0)]);
+
+    // Up and down keep the visual column, so they move between the hung spaces
+    textarea.move_cursor(CursorMove::Down);
+    assert_eq!(textarea.cursor(), (0, 9));
+    textarea.move_cursor(CursorMove::Down);
+    assert_eq!(textarea.cursor(), (0, 14));
+    textarea.move_cursor(CursorMove::Up);
+    assert_eq!(textarea.cursor(), (0, 9));
+
+    // Moving forward off the hung space goes to the start of the next row
+    textarea.move_cursor(CursorMove::Forward);
+    assert_eq!(textarea.cursor(), (0, 10));
+    let buf = render_buffer(&textarea, 4, 4);
+    assert_eq!(cursor_cells(&buf), [(0, 2)]);
+}
+
+#[test]
+fn word_wrap_cursor_after_a_space_typed_at_the_row_end_stays_visible() {
+    let mut textarea = TextArea::default();
+    textarea.set_wrap_mode(WrapMode::Word);
+    textarea.set_line_number_style(Style::default());
+    // A line that fills its row puts the cursor at its end past the right edge
+    textarea.insert_str("aaaa");
+    let buf = render_buffer(&textarea, 7, 2);
+    assert_eq!(cursor_cells(&buf), [(6, 0)]);
+
+    textarea.insert_char(' ');
+    let buf = render_buffer(&textarea, 7, 2);
+    let lines = render_lines(&textarea, 7, 2);
+    assert_eq!(lines, [" 1 aaaa", "       "]);
+    assert_eq!(cursor_cells(&buf), [(6, 0)]);
+
+    textarea.insert_char('b');
+    let buf = render_buffer(&textarea, 7, 2);
+    let lines = render_lines(&textarea, 7, 2);
+    assert_eq!(lines, [" 1 aaaa", "   b   "]);
+    assert_eq!(cursor_cells(&buf), [(4, 1)]);
+}
+
+#[test]
+fn word_wrap_round_trips_every_position_with_hung_whitespace() {
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        let text = "aaaa bbbb  cc\tdddd 日本 x";
+        let mut textarea = TextArea::from([text]);
+        textarea.set_wrap_mode(mode);
+        render(&textarea, 4, 12);
+
+        for col in 0..=text.chars().count() {
+            textarea.move_cursor(CursorMove::Jump(0, col as u16));
+            let screen = textarea.screen_cursor();
+            assert_eq!(
+                textarea.screen_to_data(screen.row, screen.col),
+                DataCursor(0, col),
+                "{mode:?}: char {col} is drawn at {:?}",
+                (screen.row, screen.col),
+            );
+            let buf = render_buffer(&textarea, 4, 12);
+            assert!(
+                !cursor_cells(&buf).is_empty(),
+                "{mode:?}: cursor at char {col} is not drawn"
+            );
+        }
+    }
 }
