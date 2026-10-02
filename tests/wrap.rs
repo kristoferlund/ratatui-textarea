@@ -566,11 +566,12 @@ fn word_wrap_cursor_after_a_space_typed_at_the_row_end_stays_visible() {
 #[test]
 fn word_wrap_round_trips_every_position_with_hung_whitespace() {
     for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
-        let text = "aaaa bbbb  cc\tdddd 日本 x";
+        let text = "aaaa bbbb  cc\tdddd 日本      x";
         let mut textarea = TextArea::from([text]);
         textarea.set_wrap_mode(mode);
         render(&textarea, 4, 12);
 
+        let mut prev_cells = vec![];
         for col in 0..=text.chars().count() {
             textarea.move_cursor(CursorMove::Jump(0, col as u16));
             let screen = textarea.screen_cursor();
@@ -581,10 +582,43 @@ fn word_wrap_round_trips_every_position_with_hung_whitespace() {
                 (screen.row, screen.col),
             );
             let buf = render_buffer(&textarea, 4, 12);
+            let cells = cursor_cells(&buf);
             assert!(
-                !cursor_cells(&buf).is_empty(),
+                !cells.is_empty(),
                 "{mode:?}: cursor at char {col} is not drawn"
             );
+            // Every move draws the cursor somewhere new, except onto the one position past the right edge of a full
+            // row, which is drawn on the last character of the row
+            assert!(
+                cells != prev_cells || screen.col == 4,
+                "{mode:?}: cursor at char {col} is drawn where char {} was",
+                col - 1,
+            );
+            prev_cells = cells;
         }
+    }
+}
+
+#[test]
+fn word_wrap_cursor_moves_visibly_through_a_run_of_whitespace() {
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        let mut textarea = TextArea::from(["aa        bb"]);
+        textarea.set_wrap_mode(mode);
+        let lines = render_lines(&textarea, 4, 4);
+        assert_eq!(lines, ["aa  ", "    ", "bb  ", "    "], "{mode:?}");
+
+        let mut cells = vec![];
+        for col in 0..=12 {
+            textarea.move_cursor(CursorMove::Jump(0, col));
+            let buf = render_buffer(&textarea, 4, 4);
+            cells.extend(cursor_cells(&buf));
+        }
+        #[rustfmt::skip]
+        let want = [
+            (0, 0), (1, 0), (2, 0), (3, 0), (3, 0),
+            (0, 1), (1, 1), (2, 1), (3, 1), (3, 1),
+            (0, 2), (1, 2), (2, 2),
+        ];
+        assert_eq!(cells, want, "{mode:?}");
     }
 }

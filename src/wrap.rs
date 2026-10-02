@@ -121,57 +121,68 @@ fn wrap_word_chunks(
         return vec![(0, 0)];
     }
 
-    let mut out: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0usize;
-    let mut seg_start = chunks[0].start;
-    let mut seg_end = seg_start;
+    let mut out = Vec::new();
+    let mut seg_start = 0usize;
+    let mut seg_end = 0usize;
     let mut seg_width = 0usize;
+    // The row ends on a word wider than the row, and takes nothing more but the whitespace after it
+    let mut closed = false;
+    // Whitespace hangs past the right edge of the row, which takes nothing more
+    let mut hung = false;
 
-    while i < chunks.len() {
-        let chunk = chunks[i];
-        if seg_end == seg_start {
-            seg_start = chunk.start;
-        }
-
+    for chunk in chunks {
         let text = chunk_text(line, chunk);
-        let chunk_width = display_width_from(text, seg_width, tab_len);
-        // Whitespace at a break hangs at the end of the row before it, past the right edge if need be, so that a row
-        // never starts with the space that separates it from the previous one
-        let is_space = text.chars().all(char::is_whitespace);
-        if is_space && seg_end == seg_start {
-            if let Some(prev) = out.last_mut().filter(|prev| prev.1 == chunk.start) {
-                prev.1 = chunk.end;
-                i += 1;
-                seg_start = chunk.end;
-                seg_end = chunk.end;
-                continue;
+
+        // Whitespace at a break stays on the row before it, so that a row never starts with the space that separates
+        // it from the previous one. What fits is drawn, and at most one character hangs past the right edge, where it
+        // is not drawn. Any more starts the next row, so that every position but the hung one has a cell of its own.
+        // A tab hangs like a space, whatever its width, since nothing past the edge is drawn.
+        if text.chars().all(char::is_whitespace) {
+            for (offset, c) in text.char_indices() {
+                if hung {
+                    out.push((seg_start, seg_end));
+                    seg_start = seg_end;
+                    seg_width = 0;
+                    closed = false;
+                }
+                let end = offset + c.len_utf8();
+                seg_width = display_width_to(&text[offset..end], seg_width, tab_len);
+                seg_end = chunk.start + end;
+                hung = seg_width > width;
             }
+            continue;
         }
 
-        if seg_width + chunk_width <= width || (is_space && seg_end > seg_start) {
+        let chunk_width = display_width_from(text, seg_width, tab_len);
+        if !closed && seg_width + chunk_width <= width {
             seg_end = chunk.end;
             seg_width += chunk_width;
-            i += 1;
             continue;
         }
 
         if seg_end > seg_start {
             out.push((seg_start, seg_end));
             seg_start = seg_end;
-            seg_width = 0;
+            closed = false;
+            hung = false;
+        }
+
+        let chunk_width = display_width_from(text, 0, tab_len);
+        if chunk_width <= width {
+            seg_end = chunk.end;
+            seg_width = chunk_width;
             continue;
         }
 
+        // A word wider than the row is split, or kept whole on a row of its own
         if fallback_to_glyph {
             split_range_by_grapheme_width(line, chunk.start, chunk.end, width, tab_len, &mut out);
+            (seg_start, seg_end) = out.pop().unwrap_or((chunk.start, chunk.end));
         } else {
-            out.push((chunk.start, chunk.end));
+            (seg_start, seg_end) = (chunk.start, chunk.end);
         }
-
-        i += 1;
-        seg_start = chunk.end;
-        seg_end = chunk.end;
-        seg_width = 0;
+        seg_width = display_width_from(&line[seg_start..seg_end], 0, tab_len);
+        closed = true;
     }
 
     if seg_end > seg_start {
@@ -303,26 +314,44 @@ mod tests {
             let have = segments("aaaa bbbb cccc", mode, 4);
             assert_eq!(have, vec!["aaaa ", "bbbb ", "cccc"], "{mode:?}");
 
+            // A tab hangs like a space, at the edge or across it
+            let have = segments("aaa\tbb", mode, 3);
+            assert_eq!(have, vec!["aaa\t", "bb"], "{mode:?}");
+            let have = segments("aa\tbb", mode, 3);
+            assert_eq!(have, vec!["aa\t", "bb"], "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn word_wrap_hangs_at_most_one_cell_of_whitespace() {
+        for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+            // The whitespace that fits stays on the row, one more character hangs past the edge, and the rest starts
+            // the next row
+            let have = segments("aa        bb", mode, 4);
+            assert_eq!(have, vec!["aa   ", "     ", "bb"], "{mode:?}");
+
             let have = segments("aa   bb", mode, 2);
-            assert_eq!(have, vec!["aa   ", "bb"], "{mode:?}");
+            assert_eq!(have, vec!["aa ", "  ", "bb"], "{mode:?}");
 
             let have = segments("aa \t bb", mode, 3);
-            assert_eq!(have, vec!["aa \t ", "bb"], "{mode:?}");
+            assert_eq!(have, vec!["aa \t", " bb"], "{mode:?}");
         }
     }
 
     #[test]
     fn word_wrap_hangs_whitespace_after_a_long_word() {
-        let have = segments("helloworld x", WrapMode::Word, 4);
-        assert_eq!(have, vec!["helloworld ", "x"]);
+        let have = segments("helloworld   x", WrapMode::Word, 4);
+        assert_eq!(have, vec!["helloworld ", "  x"]);
 
         let have = segments("helloworld x", WrapMode::WordOrGlyph, 4);
         assert_eq!(have, vec!["hell", "owor", "ld ", "x"]);
     }
 
     #[test]
-    fn word_wrap_keeps_leading_whitespace_of_a_line() {
-        let have = segments("    ab", WrapMode::Word, 2);
-        assert_eq!(have, vec!["    ", "ab"]);
+    fn word_wrap_breaks_leading_whitespace_of_a_line_like_any_other() {
+        for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+            let have = segments("    ab", mode, 2);
+            assert_eq!(have, vec!["   ", " ", "ab"], "{mode:?}");
+        }
     }
 }
