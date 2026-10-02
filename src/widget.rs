@@ -4,13 +4,15 @@ use crate::wrap::WrapMode;
 #[cfg(feature = "portable-atomic")]
 use portable_atomic::{AtomicU64, Ordering};
 use ratatui_core::buffer::Buffer;
-use ratatui_core::layout::Rect;
+use ratatui_core::layout::{Alignment, Rect};
 use ratatui_core::text::{Line, Span, Text};
 use ratatui_core::widgets::Widget;
 use ratatui_widgets::paragraph::Paragraph;
 use std::cmp;
 #[cfg(not(feature = "portable-atomic"))]
 use std::sync::atomic::{AtomicU64, Ordering};
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
 // &mut 'a (u16, u16, u16, u16) is not available since `render` method takes immutable reference of TextArea
 // instance. In the case, the TextArea instance cannot be accessed from any other objects since it is mutablly
@@ -92,15 +94,50 @@ fn next_scroll_top(prev_top: u16, cursor: u16, len: u16) -> u16 {
     }
 }
 
+// Cut the columns `left..left + width` out of a line. A wide character cut by either edge is drawn as blank cells in
+// its own style, so everything else stays in its column and a cursor on that character is still drawn.
+fn clip_line(line: Line<'_>, left: usize, width: usize) -> Line<'_> {
+    if left == 0 && line.width() <= width {
+        return line;
+    }
+
+    let right = left + width;
+    let mut col = 0;
+    let mut spans = Vec::with_capacity(line.spans.len());
+    for span in line.spans {
+        let mut text = String::new();
+        for grapheme in span.content.graphemes(true) {
+            let start = col;
+            col += grapheme.width();
+            if left <= start && col <= right {
+                text.push_str(grapheme);
+            } else if start < right && left < col {
+                let cells = cmp::min(col, right) - cmp::max(start, left);
+                text.extend(std::iter::repeat_n(' ', cells));
+            }
+        }
+        if !text.is_empty() {
+            spans.push(Span::styled(text, span.style));
+        }
+    }
+    Line { spans, ..line }
+}
+
 impl<'a> TextArea<'a> {
-    fn text_widget(&'a self, top_row: usize, height: usize) -> Text<'a> {
+    fn text_widget(&'a self, top_row: usize, height: usize, top_col: u16, width: u16) -> Text<'a> {
         let lnum_len = num_digits(self.lines().len());
         let screen_lines = self.screen_lines.borrow();
         let bottom_row = cmp::min(top_row + height, screen_lines.len());
         let mut lines = Vec::with_capacity(bottom_row - top_row);
         for row in &screen_lines[top_row..bottom_row] {
             let line = &self.lines()[row.wrapped.row];
-            lines.push(self.line_spans_segment(line, &row.wrapped, lnum_len));
+            let mut spans = self.line_spans_segment(line, &row.wrapped, lnum_len);
+            // Scrolled here, not by `Paragraph::scroll`, which draws a wide character cut by the left edge whole and
+            // drops one cut by the right edge. Like that scroll, only left-aligned text is scrolled.
+            if self.alignment() == Alignment::Left {
+                spans = clip_line(spans, top_col.into(), width.into());
+            }
+            lines.push(spans);
         }
         Text::from(lines)
     }
@@ -156,7 +193,7 @@ impl Widget for &TextArea<'_> {
                 0
             };
             (
-                self.text_widget(top_row as _, height as _)
+                self.text_widget(top_row as _, height as _, top_col, width)
                     .style(self.style()),
                 top_row,
                 top_col,
@@ -166,13 +203,10 @@ impl Widget for &TextArea<'_> {
         // To get fine control over the text color and the surrrounding block they have to be rendered separately
         // see https://github.com/ratatui/ratatui/issues/144
         let mut text_area = area;
-        let mut inner = Paragraph::new(text).alignment(self.alignment());
+        let inner = Paragraph::new(text).alignment(self.alignment());
         if let Some(b) = self.block() {
             text_area = b.inner(area);
             b.render(area, buf)
-        }
-        if top_col != 0 {
-            inner = inner.scroll((0, top_col));
         }
 
         // Store scroll top position for rendering on the next tick
