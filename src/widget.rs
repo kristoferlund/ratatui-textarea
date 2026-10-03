@@ -1,3 +1,4 @@
+use crate::screen_map::char_display_width;
 use crate::textarea::TextArea;
 use crate::util::num_digits;
 use crate::wrap::WrapMode;
@@ -161,18 +162,27 @@ impl<'a> TextArea<'a> {
     }
 
     // A wrapped row can run past the right edge: whitespace at a break hangs there, and so does the cursor at the end
-    // of a line that fills its last row. A cursor out there is drawn in the last cell of its row instead. A row that
-    // overflows is drawn from the left edge under every alignment, so its last cell is the last cell of the area.
+    // of a line that fills its last row. A glyph that does not fit whole is not drawn, so a cursor on a glyph past or
+    // across the edge, such as a wide whitespace that starts in the last cell, is drawn in the last cell of its row
+    // instead, which is the last cell of the area under every alignment: a row that overflows is drawn from the left
+    // edge, and a row that a dropped wide glyph leaves narrower than the area falls short of the edge by one cell at
+    // most, whichever way it is aligned.
     fn draw_cursor_past_right_edge(&self, area: Rect, top_row: u16, buf: &mut Buffer) {
         if self.wrap_mode() == WrapMode::None || area.width == 0 {
             return;
         }
         let cursor = self.screen_cursor();
+        let glyph_width = cursor
+            .char
+            .map_or(1, |c| {
+                char_display_width(c, cursor.col, self.tab_length(), self.mask_char())
+            })
+            .max(1);
         let col = cursor.col + usize::from(self.line_number_width());
         let Some(row) = cursor.row.checked_sub(top_row.into()) else {
             return;
         };
-        if col < usize::from(area.width) || row >= usize::from(area.height) {
+        if col + glyph_width <= usize::from(area.width) || row >= usize::from(area.height) {
             return;
         }
 

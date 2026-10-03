@@ -138,7 +138,8 @@ fn wrap_word_chunks(
 
         // Whitespace at a break stays on the row before it, so that a row never starts with the space that separates
         // it from the previous one. What fits is drawn, and at most one character hangs past the right edge, where it
-        // is not drawn. Any more starts the next row, so that every position but the hung one has a cell of its own.
+        // is not drawn. Any more starts the next row, so that only the last character of a full row, the whitespace
+        // hung after it and the end of the line after that share a cell, the last one of the row.
         // A tab hangs like a space, whatever its width, since nothing past the edge is drawn.
         if text.chars().all(char::is_whitespace) {
             for (offset, c) in text.char_indices() {
