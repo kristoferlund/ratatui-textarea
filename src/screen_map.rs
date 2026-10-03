@@ -169,17 +169,32 @@ impl TextArea<'_> {
         DataCursor(line.wrapped.row, line.wrapped.start_col + char_offset)
     }
 
-    // A column past the right edge of a row that is not the last of its line is on the character that hangs there,
-    // such as the whitespace at a word wrap break, since that character is drawn in the last cell of the row. Any
-    // other column is left as it is.
-    pub(crate) fn clamp_col_to_hung_char(&self, row: usize, col: usize) -> usize {
-        let line = self.screen_line(row);
-        match self.wrap_width() {
-            Some(width) if !line.wrapped.last_in_row && line.screen_width > width => {
-                col.min(line.cursor_max_col)
-            }
-            _ => col,
+    // A word wrapped row that is not the last of its line and ends in whitespace, which fits or hangs past the right
+    // edge, ends its last word there. A column past what is drawn of the row lands on the first of that whitespace,
+    // right after the word, so a click right of the row goes the same place whether its whitespace fits or hangs.
+    // Any other column, and any other row, is left to `screen_to_array`, which maps a column past a row to its
+    // exclusive end.
+    pub(crate) fn trailing_whitespace_past_row_end(
+        &self,
+        row: usize,
+        col: usize,
+    ) -> Option<DataCursor> {
+        if !matches!(self.wrap_mode(), WrapMode::Word | WrapMode::WordOrGlyph) {
+            return None;
         }
+        let width = self.wrap_width()?;
+        let line = self.screen_line(row);
+        if line.wrapped.last_in_row || col < line.screen_width.min(width) {
+            return None;
+        }
+        let fragment =
+            &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
+        let trailing = fragment
+            .chars()
+            .rev()
+            .take_while(|c| c.is_whitespace())
+            .count();
+        (trailing > 0).then(|| DataCursor(line.wrapped.row, line.wrapped.end_col - trailing))
     }
 
     pub(crate) fn array_to_screen(&self, array: DataCursor) -> ScreenCursor {

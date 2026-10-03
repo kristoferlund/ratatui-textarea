@@ -619,9 +619,23 @@ fn word_wrap_round_trips_every_position_with_hung_whitespace() {
         for col in 0..=text.chars().count() {
             textarea.move_cursor(CursorMove::Jump(0, col as u16));
             let screen = textarea.screen_cursor();
+            // A whitespace hung past the right edge is not drawn, and a column past the row is one place, the first of
+            // the whitespace that ends the row, which is the hung whitespace when it is alone
+            let want = if screen.col >= 4 {
+                let past = textarea.screen_to_data(screen.row, 99);
+                let between: String = text.chars().take(col).skip(past.1).collect();
+                assert!(
+                    past.1 <= col && between.chars().all(char::is_whitespace),
+                    "{mode:?} {text:?}: a column past the row of char {col} is char {}",
+                    past.1,
+                );
+                past
+            } else {
+                DataCursor(0, col)
+            };
             assert_eq!(
                 textarea.screen_to_data(screen.row, screen.col),
-                DataCursor(0, col),
+                want,
                 "{mode:?} {text:?}: char {col} is drawn at {:?}",
                 (screen.row, screen.col),
             );
@@ -694,7 +708,7 @@ fn word_wrap_cursor_on_a_wide_whitespace_across_the_right_edge_is_drawn() {
 }
 
 #[test]
-fn word_wrap_click_right_of_a_row_lands_on_its_hung_whitespace() {
+fn word_wrap_click_right_of_a_row_lands_on_its_trailing_whitespace() {
     for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
         // The whitespace hung past the right edge is drawn in the last cell, so a column past the row lands on it, on
         // the same row, and not after it on the next row
@@ -704,17 +718,20 @@ fn word_wrap_click_right_of_a_row_lands_on_its_hung_whitespace() {
         assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
         assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
 
+        // A column past a row that ends in a run of whitespace lands on the first of it, right after the last word
         let mut textarea = TextArea::from(["aa        bb"]);
         textarea.set_wrap_mode(mode);
         render(&textarea, 4, 4);
-        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 3), DataCursor(0, 3), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 4), DataCursor(0, 2), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 2), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 5), "{mode:?}");
 
-        // A whitespace that fits is drawn on its row, and a column past it is the insertion point after it
+        // So does a column past a whitespace that fits on its row
         let mut textarea = TextArea::from(["aaa bbbb"]);
         textarea.set_wrap_mode(mode);
         render(&textarea, 4, 4);
-        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 3), "{mode:?}");
     }
 
     // A wide whitespace across the right edge hangs too
@@ -726,6 +743,48 @@ fn word_wrap_click_right_of_a_row_lands_on_its_hung_whitespace() {
 }
 
 #[test]
+fn word_wrap_click_right_of_a_row_is_the_same_whether_its_whitespace_fits_or_hangs() {
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        // At width 6 the space fits on the first row, at width 4 it hangs past the right edge. Either way a click
+        // right of the row lands on the space, and typing there goes right after the word.
+        for width in [6, 4] {
+            let mut textarea = TextArea::from(["line 29"]);
+            textarea.set_wrap_mode(mode);
+            let lines = render_lines(&textarea, width, 2);
+            assert_eq!(lines[1].trim_end(), "29", "{mode:?} at {width}");
+
+            let clicked = textarea.screen_to_data(0, usize::from(width) + 3);
+            assert_eq!(clicked, DataCursor(0, 4), "{mode:?} at {width}");
+            textarea.move_cursor(CursorMove::Jump(clicked.0 as u16, clicked.1 as u16));
+            textarea.insert_char('x');
+            assert_eq!(textarea.lines(), ["linex 29"], "{mode:?} at {width}");
+        }
+
+        // The cell right after the space that fits is past the row too
+        let mut textarea = TextArea::from(["line 29"]);
+        textarea.set_wrap_mode(mode);
+        render(&textarea, 6, 2);
+        assert_eq!(textarea.screen_to_data(0, 5), DataCursor(0, 4), "{mode:?}");
+    }
+}
+
+#[test]
+fn word_wrap_click_right_of_a_row_not_ending_in_whitespace_is_its_exclusive_end() {
+    // A long word split by WrapMode::WordOrGlyph
+    let mut textarea = TextArea::from(["aaaaaaaa b"]);
+    textarea.set_wrap_mode(WrapMode::WordOrGlyph);
+    render(&textarea, 4, 4);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4));
+
+    // A long word kept whole by WrapMode::Word, followed by punctuation
+    let mut textarea = TextArea::from(["abcdef,g"]);
+    textarea.set_wrap_mode(WrapMode::Word);
+    let lines = render_lines(&textarea, 4, 3);
+    assert_eq!(lines, ["abcd", ",g  ", "    "]);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 6));
+}
+
+#[test]
 fn glyph_wrap_click_right_of_a_row_is_its_exclusive_end() {
     // Nothing hangs, so a column past the row is the insertion point after its last character
     let mut textarea = TextArea::from(["aaaabbbb"]);
@@ -733,4 +792,11 @@ fn glyph_wrap_click_right_of_a_row_is_its_exclusive_end() {
     render(&textarea, 4, 4);
     assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4));
     assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 8));
+
+    // Nor does a row that ends in whitespace
+    let mut textarea = TextArea::from(["aa bb"]);
+    textarea.set_wrap_mode(WrapMode::Glyph);
+    let lines = render_lines(&textarea, 3, 3);
+    assert_eq!(lines, ["aa ", "bb ", "   "]);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 3));
 }
