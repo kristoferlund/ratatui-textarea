@@ -170,8 +170,9 @@ impl TextArea<'_> {
     }
 
     // A word wrapped row that is not the last of its line and ends in whitespace, which fits or hangs past the right
-    // edge, ends its last word there. A column past what is drawn of the row lands on the first of that whitespace,
-    // right after the word, so a click right of the row goes the same place whether its whitespace fits or hangs.
+    // edge, ends its last word there. A column past what is drawn of the row lands on the last of that whitespace, the
+    // hung one when it hangs, so a click right of the row goes the same place whether its whitespace fits or hangs,
+    // and a click further right never lands further back than one nearer the row.
     // Any other column, and any other row, is left to `screen_to_array`, which maps a column past a row to its
     // exclusive end.
     pub(crate) fn trailing_whitespace_past_row_end(
@@ -189,12 +190,11 @@ impl TextArea<'_> {
         }
         let fragment =
             &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
-        let trailing = fragment
+        fragment
             .chars()
-            .rev()
-            .take_while(|c| c.is_whitespace())
-            .count();
-        (trailing > 0).then(|| DataCursor(line.wrapped.row, line.wrapped.end_col - trailing))
+            .next_back()
+            .is_some_and(char::is_whitespace)
+            .then(|| DataCursor(line.wrapped.row, line.wrapped.end_col - 1))
     }
 
     pub(crate) fn array_to_screen(&self, array: DataCursor) -> ScreenCursor {
