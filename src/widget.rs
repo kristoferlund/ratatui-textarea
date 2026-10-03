@@ -12,7 +12,7 @@ use std::cmp;
 #[cfg(not(feature = "portable-atomic"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use unicode_segmentation::UnicodeSegmentation as _;
-use unicode_width::UnicodeWidthStr as _;
+use unicode_width::{UnicodeWidthChar as _, UnicodeWidthStr as _};
 
 // &mut 'a (u16, u16, u16, u16) is not available since `render` method takes immutable reference of TextArea
 // instance. In the case, the TextArea instance cannot be accessed from any other objects since it is mutablly
@@ -147,7 +147,8 @@ impl<'a> TextArea<'a> {
     }
 
     fn scroll_top_col(&self, prev_top: u16, width: u16) -> u16 {
-        let mut cursor = self.screen_cursor().col as u16;
+        let screen = self.screen_cursor();
+        let mut cursor = screen.col as u16;
         // Adjust the cursor position due to the width of line number.
         if self.line_number_style().is_some() {
             let lnum = self.line_number_width();
@@ -156,6 +157,13 @@ impl<'a> TextArea<'a> {
             } else {
                 cursor += lnum; // The cursor position is shifted by the line number part
             };
+        }
+        // Scrolling right keeps the whole char under the cursor in view, not just its first column, unless it is wider
+        // than the viewport
+        let glyph_width = screen.char.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
+        let right = cursor + glyph_width - 1;
+        if prev_top <= cursor && prev_top + width <= right {
+            return (right + 1 - width).min(cursor);
         }
         next_scroll_top(prev_top, cursor, width)
     }
