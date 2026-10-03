@@ -2,6 +2,7 @@ use crate::cursor::{DataCursor, ScreenCursor};
 use crate::textarea::TextArea;
 use crate::util::num_digits;
 use crate::wrap::{WrapMode, WrappedLine, effective_wrap_width, wrapped_rows};
+use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy)]
@@ -49,18 +50,35 @@ fn screen_col_for_char_offset(text: &str, char_offset: usize, tab_len: u8) -> us
 }
 
 fn char_offset_for_screen_col(text: &str, screen_col: usize, tab_len: u8) -> usize {
+    let chars = text.char_indices().map(|(i, c)| &text[i..i + c.len_utf8()]);
+    offset_for_screen_col(chars, screen_col, tab_len)
+}
+
+// Steps over whole grapheme clusters, so that the offset never falls between a character and its combining marks
+fn grapheme_offset_for_screen_col(text: &str, screen_col: usize, tab_len: u8) -> usize {
+    offset_for_screen_col(text.graphemes(true), screen_col, tab_len)
+}
+
+// The offset in chars of the first of `units` that covers or follows `screen_col`
+fn offset_for_screen_col<'a>(
+    units: impl Iterator<Item = &'a str>,
+    screen_col: usize,
+    tab_len: u8,
+) -> usize {
     let mut col = 0usize;
     let mut chars = 0usize;
-    for c in text.chars() {
+    for unit in units {
         if col >= screen_col {
             break;
         }
-        let width = char_display_width(c, col, tab_len);
-        if col + width > screen_col {
+        let end = unit
+            .chars()
+            .fold(col, |col, c| col + char_display_width(c, col, tab_len));
+        if end > screen_col {
             break;
         }
-        col += width;
-        chars += 1;
+        col = end;
+        chars += unit.chars().count();
     }
     chars
 }
@@ -165,6 +183,16 @@ impl TextArea<'_> {
             &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
         let char_offset = char_offset_for_screen_col(fragment, screen.col, self.tab_length());
         DataCursor(line.wrapped.row, line.wrapped.start_col + char_offset)
+    }
+
+    // The hit test behind `TextArea::screen_to_data`. Unlike `screen_to_array`, it lands on whole grapheme clusters
+    // only.
+    pub(crate) fn screen_to_data_cursor(&self, row: usize, col: usize) -> DataCursor {
+        let line = self.screen_line(row);
+        let fragment =
+            &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
+        let offset = grapheme_offset_for_screen_col(fragment, col, self.tab_length());
+        DataCursor(line.wrapped.row, line.wrapped.start_col + offset)
     }
 
     pub(crate) fn array_to_screen(&self, array: DataCursor) -> ScreenCursor {
