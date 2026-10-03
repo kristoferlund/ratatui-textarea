@@ -2039,6 +2039,30 @@ fn test_mask_takes_its_own_width() {
 }
 
 #[test]
+fn test_mask_scrolls_the_whole_mask_char_under_the_cursor_into_view() {
+    // A full-width mask over narrow text: moving right, the cursor cell holds the
+    // mask char, never the blank left half of one cut by the right edge
+    let mut textarea = TextArea::from(["abcdef"]);
+    textarea.set_mask_char('＊');
+    for col in 0..6 {
+        let buf = render_buffer(&textarea, 5, 1);
+        let x = (textarea.screen_cursor().col as u16)
+            .checked_sub(textarea.scroll_offset().1)
+            .unwrap();
+        assert_eq!(cursor_cells(&buf), [(x, 0)], "cursor at {col}");
+        assert_eq!(buf[(x, 0)].symbol(), "＊", "cursor at {col}");
+        textarea.move_cursor(CursorMove::Forward);
+    }
+
+    // A narrow mask over wide text scrolls by the mask, one cell per char
+    let mut textarea = TextArea::from([JAPANESE]);
+    textarea.set_mask_char('*');
+    textarea.move_cursor(CursorMove::Jump(0, 4));
+    render_buffer(&textarea, 4, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 1));
+}
+
+#[test]
 fn test_mask_hit_tests_every_masked_char() {
     // A combining mark is drawn as a mask char of its own, so the hit test steps over chars, not grapheme clusters
     let mut textarea = TextArea::from(["a\u{301}b"]);

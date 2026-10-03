@@ -159,9 +159,10 @@ impl<'a> TextArea<'a> {
                 cursor += lnum; // The cursor position is shifted by the line number part
             };
         }
-        // Scrolling right keeps the whole char under the cursor in view, not just its first column, unless it is wider
-        // than the viewport
-        let glyph_width = screen.char.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
+        // Scrolling right keeps the whole glyph under the cursor in view, not just its first column, unless it is
+        // wider than the viewport. With a mask, that glyph is the mask char.
+        let glyph = screen.char.map(|c| self.mask_char().unwrap_or(c));
+        let glyph_width = glyph.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
         let right = cursor + glyph_width - 1;
         if prev_top <= cursor && prev_top + width <= right {
             return (right + 1 - width).min(cursor);

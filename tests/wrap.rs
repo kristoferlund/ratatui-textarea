@@ -783,11 +783,17 @@ fn word_wrap_click_along_a_row_never_moves_back() {
         "ab\u{3000}\u{3000}cd",
         "line 29",
     ];
-    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+    for (mode, mask) in [WrapMode::Word, WrapMode::WordOrGlyph]
+        .into_iter()
+        .flat_map(|mode| [None, Some('*')].map(|mask| (mode, mask)))
+    {
         for text in texts {
             for width in 1..=9 {
                 let mut textarea = TextArea::from([text]);
                 textarea.set_wrap_mode(mode);
+                if let Some(mask) = mask {
+                    textarea.set_mask_char(mask);
+                }
                 render(&textarea, width, 40);
                 for row in 0..40 {
                     let cols: Vec<_> = (0..=usize::from(width) + 2)
@@ -795,7 +801,7 @@ fn word_wrap_click_along_a_row_never_moves_back() {
                         .collect();
                     assert!(
                         cols.is_sorted(),
-                        "{mode:?} {text:?} at width {width}: row {row} maps to {cols:?}",
+                        "{mode:?} {mask:?} {text:?} at width {width}: row {row} maps to {cols:?}",
                     );
                 }
             }
