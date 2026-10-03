@@ -2276,12 +2276,8 @@ impl<'a> TextArea<'a> {
     ///
     /// Positions outside the text clamp rather than being rejected: a row
     /// past the last display line resolves to that line, and a column past
-    /// the end of a line resolves to its end. A column past the end of a
-    /// soft-wrapped row that does not end its line resolves to the last
-    /// character of that row, since its end is the start of the next row.
-    /// A click below or to the right of the text therefore lands where a
-    /// reader would expect. The position returned never falls inside a
-    /// grapheme cluster, such as between a letter and its combining accent.
+    /// the end of a line resolves to its end. A click below or to the
+    /// right of the text therefore lands where a reader would expect.
     /// ```
     /// use ratatui_textarea::{CursorMove, DataCursor, TextArea};
     ///
@@ -2300,7 +2296,12 @@ impl<'a> TextArea<'a> {
         // Every internal caller passes a row that came out of the screen
         // map, so the bound is checked here, at the public boundary.
         let row = row.min(self.screen_lines_count().saturating_sub(1));
-        self.screen_to_data_cursor(row, col)
+        self.screen_to_array(ScreenCursor {
+            row,
+            col,
+            char: None,
+            dc: None,
+        })
     }
 
     /// Get the current selection range as a pair of the start position and the end position. The range is bounded

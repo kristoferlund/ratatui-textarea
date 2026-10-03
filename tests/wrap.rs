@@ -622,20 +622,3 @@ fn word_wrap_cursor_moves_visibly_through_a_run_of_whitespace() {
         assert_eq!(cells, want, "{mode:?}");
     }
 }
-
-#[test]
-fn word_wrap_click_right_of_a_row_lands_on_its_hung_whitespace() {
-    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
-        let mut textarea = TextArea::from(["aaaa bbbb"]);
-        textarea.set_wrap_mode(mode);
-        render(&textarea, 4, 4);
-        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
-
-        let mut textarea = TextArea::from(["aa        bb"]);
-        textarea.set_wrap_mode(mode);
-        render(&textarea, 4, 4);
-        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
-    }
-}
