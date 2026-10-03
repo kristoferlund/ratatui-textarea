@@ -22,7 +22,7 @@ fn is_pure_ascii(line: &str) -> bool {
     line.is_ascii() && !line.contains('\t')
 }
 
-fn char_display_width(c: char, col: usize, tab_len: u8) -> usize {
+pub(crate) fn char_display_width(c: char, col: usize, tab_len: u8) -> usize {
     if c == '\t' {
         let tab = tab_len.max(1) as usize;
         let pad = tab - (col % tab);
