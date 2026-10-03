@@ -82,22 +82,20 @@ impl TextArea<'_> {
             .collect()
     }
 
-    fn wrap_width(&self) -> Option<usize> {
-        if self.wrap_mode() == WrapMode::None {
-            return None;
-        }
-        let width = self.area.get().width;
-        if width == 0 {
-            return None;
-        }
-        let line_number_len = self
-            .line_number_style()
-            .map(|_| num_digits(self.lines.len()));
-        Some(effective_wrap_width(width, line_number_len))
-    }
-
     pub(crate) fn screen_map_load(&self) {
-        let wrap_width = self.wrap_width();
+        let wrap_width = if self.wrap_mode() != WrapMode::None {
+            let width = self.area.get().width;
+            if width > 0 {
+                let line_number_len = self
+                    .line_number_style()
+                    .map(|_| num_digits(self.lines.len()));
+                Some(effective_wrap_width(width, line_number_len))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         let rows = match wrap_width {
             Some(width) => wrapped_rows(&self.lines, self.wrap_mode(), width, self.tab_length()),
@@ -170,11 +168,10 @@ impl TextArea<'_> {
     }
 
     // A word wrapped row that is not the last of its line and ends in whitespace, which fits or hangs past the right
-    // edge, ends its last word there. A column past what is drawn of the row lands on the last of that whitespace, the
-    // hung one when it hangs, so a click right of the row goes the same place whether its whitespace fits or hangs,
-    // and a click further right never lands further back than one nearer the row.
-    // Any other column, and any other row, is left to `screen_to_array`, which maps a column past a row to its
-    // exclusive end.
+    // edge, ends its last word there. A column the plain hit test maps past the row, to its exclusive end, lands on the
+    // last of that whitespace, the hung one when it hangs, so a click right of the row goes the same place whether its
+    // whitespace fits or hangs, and a click further right never lands further back than one nearer the row.
+    // A column on a character of the row, drawn or overflowing, and any other row, is left to `screen_to_array`.
     pub(crate) fn trailing_whitespace_past_row_end(
         &self,
         row: usize,
@@ -183,17 +180,23 @@ impl TextArea<'_> {
         if !matches!(self.wrap_mode(), WrapMode::Word | WrapMode::WordOrGlyph) {
             return None;
         }
-        let width = self.wrap_width()?;
         let line = self.screen_line(row);
-        if line.wrapped.last_in_row || col < line.screen_width.min(width) {
+        if line.wrapped.last_in_row {
             return None;
         }
         let fragment =
             &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
-        fragment
+        let dc = self.screen_to_array(ScreenCursor {
+            row,
+            col,
+            char: None,
+            dc: None,
+        });
+        let ends_in_whitespace = fragment
             .chars()
             .next_back()
-            .is_some_and(char::is_whitespace)
+            .is_some_and(char::is_whitespace);
+        (dc.1 == line.wrapped.end_col && ends_in_whitespace)
             .then(|| DataCursor(line.wrapped.row, line.wrapped.end_col - 1))
     }
 

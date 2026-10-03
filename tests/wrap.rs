@@ -646,6 +646,29 @@ fn word_wrap_round_trips_every_position_with_hung_whitespace() {
 }
 
 #[test]
+fn word_wrap_round_trips_every_position_of_a_word_longer_than_its_row() {
+    let text = "helloworld x";
+    for width in 1..=6 {
+        let mut textarea = TextArea::from([text]);
+        textarea.set_wrap_mode(WrapMode::Word);
+        render(&textarea, width, 12);
+
+        for col in 0..=text.chars().count() {
+            textarea.move_cursor(CursorMove::Jump(0, col as u16));
+            let screen = textarea.screen_cursor();
+            // A word longer than its row overflows it, so the columns of its undrawn characters still map back to
+            // them, not to the whitespace hung after the word
+            assert_eq!(
+                textarea.screen_to_data(screen.row, screen.col),
+                DataCursor(0, col),
+                "width {width}: char {col} is drawn at {:?}",
+                (screen.row, screen.col),
+            );
+        }
+    }
+}
+
+#[test]
 fn word_wrap_cursor_moves_visibly_through_a_run_of_whitespace() {
     for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
         let mut textarea = TextArea::from(["aa        bb"]);
