@@ -619,23 +619,11 @@ fn word_wrap_round_trips_every_position_with_hung_whitespace() {
         for col in 0..=text.chars().count() {
             textarea.move_cursor(CursorMove::Jump(0, col as u16));
             let screen = textarea.screen_cursor();
-            // A whitespace hung past the right edge is not drawn, and a column past the row is one place, the first of
-            // the whitespace that ends the row, which is the hung whitespace when it is alone
-            let want = if screen.col >= 4 {
-                let past = textarea.screen_to_data(screen.row, 99);
-                let between: String = text.chars().take(col).skip(past.1).collect();
-                assert!(
-                    past.1 <= col && between.chars().all(char::is_whitespace),
-                    "{mode:?} {text:?}: a column past the row of char {col} is char {}",
-                    past.1,
-                );
-                past
-            } else {
-                DataCursor(0, col)
-            };
+            // A whitespace hung past the right edge is not drawn, but a column past the row lands on it, the last of
+            // the row, so it maps back to itself like every other position
             assert_eq!(
                 textarea.screen_to_data(screen.row, screen.col),
-                want,
+                DataCursor(0, col),
                 "{mode:?} {text:?}: char {col} is drawn at {:?}",
                 (screen.row, screen.col),
             );
@@ -718,14 +706,30 @@ fn word_wrap_click_right_of_a_row_lands_on_its_trailing_whitespace() {
         assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
         assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
 
-        // A column past a row that ends in a run of whitespace lands on the first of it, right after the last word
+        // A column past a row that ends in a run of whitespace lands on the last of it, the hung one, and not back on
+        // the first of it, before a column nearer the row
         let mut textarea = TextArea::from(["aa        bb"]);
         textarea.set_wrap_mode(mode);
         render(&textarea, 4, 4);
         assert_eq!(textarea.screen_to_data(0, 3), DataCursor(0, 3), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(0, 4), DataCursor(0, 2), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 2), "{mode:?}");
-        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 5), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 4), DataCursor(0, 4), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
+
+        // Two spaces after a full stop that both fit on the row
+        for width in [8, 9] {
+            let mut textarea = TextArea::from(["Hello.  World"]);
+            textarea.set_wrap_mode(mode);
+            render(&textarea, width, 4);
+            let cols: Vec<_> = (0..11)
+                .map(|col| textarea.screen_to_data(0, col).1)
+                .collect();
+            assert_eq!(
+                cols,
+                [0, 1, 2, 3, 4, 5, 6, 7, 7, 7, 7],
+                "{mode:?} at {width}"
+            );
+        }
 
         // So does a column past a whitespace that fits on its row
         let mut textarea = TextArea::from(["aaa bbbb"]);
@@ -765,6 +769,37 @@ fn word_wrap_click_right_of_a_row_is_the_same_whether_its_whitespace_fits_or_han
         textarea.set_wrap_mode(mode);
         render(&textarea, 6, 2);
         assert_eq!(textarea.screen_to_data(0, 5), DataCursor(0, 4), "{mode:?}");
+    }
+}
+
+#[test]
+fn word_wrap_click_along_a_row_never_moves_back() {
+    let texts = [
+        "Hello.  World",
+        "a   bbbbb",
+        "  indented line",
+        "aa        bb",
+        "aaaa bbbb  cc\tdddd 日本      x",
+        "ab\u{3000}\u{3000}cd",
+        "line 29",
+    ];
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        for text in texts {
+            for width in 1..=9 {
+                let mut textarea = TextArea::from([text]);
+                textarea.set_wrap_mode(mode);
+                render(&textarea, width, 40);
+                for row in 0..40 {
+                    let cols: Vec<_> = (0..=usize::from(width) + 2)
+                        .map(|col| textarea.screen_to_data(row, col).1)
+                        .collect();
+                    assert!(
+                        cols.is_sorted(),
+                        "{mode:?} {text:?} at width {width}: row {row} maps to {cols:?}",
+                    );
+                }
+            }
+        }
     }
 }
 

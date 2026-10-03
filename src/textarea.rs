@@ -2277,12 +2277,12 @@ impl<'a> TextArea<'a> {
     /// Positions outside the text clamp rather than being rejected: a row
     /// past the last display line resolves to that line, and a column past
     /// the end of a line resolves to its end. A column past a row that
-    /// word wrapping broke after whitespace resolves to the first of that
-    /// whitespace, right after the last word of the row, whether it fits on
-    /// the row or hangs past its right edge. A click below or to the right
-    /// of the text therefore lands where a reader would expect. The position
-    /// returned never falls inside a grapheme cluster, such as between a
-    /// letter and its combining accent.
+    /// word wrapping broke after whitespace resolves to the last of that
+    /// whitespace, whether it fits on the row or hangs past its right
+    /// edge, so a column further right never resolves further back. A
+    /// click below or to the right of the text therefore lands where a
+    /// reader would expect. The position returned never falls inside a
+    /// grapheme cluster, such as between a letter and its combining accent.
     /// ```
     /// use ratatui_textarea::{CursorMove, DataCursor, TextArea};
     ///
