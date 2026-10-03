@@ -550,11 +550,14 @@ fn word_wrap_cursor_after_a_space_typed_at_the_row_end_stays_visible() {
     let buf = render_buffer(&textarea, 7, 2);
     assert_eq!(cursor_cells(&buf), [(6, 0)]);
 
+    // The space ends the line and starts the next row, where the cursor after it is drawn
     textarea.insert_char(' ');
     let buf = render_buffer(&textarea, 7, 2);
     let lines = render_lines(&textarea, 7, 2);
     assert_eq!(lines, [" 1 aaaa", "       "]);
-    assert_eq!(cursor_cells(&buf), [(6, 0)]);
+    assert_eq!(cursor_cells(&buf), [(4, 1)]);
+
+    // Text after it makes it hang at the break
 
     textarea.insert_char('b');
     let buf = render_buffer(&textarea, 7, 2);
@@ -564,9 +567,50 @@ fn word_wrap_cursor_after_a_space_typed_at_the_row_end_stays_visible() {
 }
 
 #[test]
-fn word_wrap_round_trips_every_position_with_hung_whitespace() {
+fn word_wrap_cursor_moves_when_a_space_is_typed_after_a_word_that_fills_the_row() {
     for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
-        let text = "aaaa bbbb  cc\tdddd 日本      x";
+        let mut textarea = TextArea::default();
+        textarea.set_wrap_mode(mode);
+        textarea.insert_str("hello");
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [(4, 0)], "{mode:?}");
+
+        // The space ends the line, so it does not hang but starts the next row, and the cursor after it moves there
+        textarea.insert_char(' ');
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [(1, 1)], "{mode:?}");
+        textarea.move_cursor(CursorMove::Back);
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [(0, 1)], "{mode:?}");
+        textarea.move_cursor(CursorMove::Back);
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [(4, 0)], "{mode:?}");
+
+        // A second space moves it again
+        textarea.move_cursor(CursorMove::End);
+        textarea.insert_char(' ');
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [(2, 1)], "{mode:?}");
+
+        // Text after the whitespace makes it hang at the break as before
+        textarea.insert_char('x');
+        let lines = render_lines(&textarea, 5, 3);
+        assert_eq!(lines, ["hello", " x   ", "     "], "{mode:?}");
+    }
+}
+
+#[test]
+fn word_wrap_round_trips_every_position_with_hung_whitespace() {
+    let texts = [
+        "aaaa bbbb  cc\tdddd 日本      x",
+        // Whitespace that ends the line, after a word that fills its row
+        "aaaa bbbb ",
+        "aaaa bbbb   ",
+    ];
+    for (mode, text) in [WrapMode::Word, WrapMode::WordOrGlyph]
+        .into_iter()
+        .flat_map(|mode| texts.map(|text| (mode, text)))
+    {
         let mut textarea = TextArea::from([text]);
         textarea.set_wrap_mode(mode);
         render(&textarea, 4, 12);
@@ -578,20 +622,20 @@ fn word_wrap_round_trips_every_position_with_hung_whitespace() {
             assert_eq!(
                 textarea.screen_to_data(screen.row, screen.col),
                 DataCursor(0, col),
-                "{mode:?}: char {col} is drawn at {:?}",
+                "{mode:?} {text:?}: char {col} is drawn at {:?}",
                 (screen.row, screen.col),
             );
             let buf = render_buffer(&textarea, 4, 12);
             let cells = cursor_cells(&buf);
             assert!(
                 !cells.is_empty(),
-                "{mode:?}: cursor at char {col} is not drawn"
+                "{mode:?} {text:?}: cursor at char {col} is not drawn"
             );
             // Every move draws the cursor somewhere new, except onto a position past the right edge of a full row:
-            // the last character, the whitespace hung after it and the end of the line after that share the last cell
+            // the last character and the whitespace hung after it, or the end of the line, share the last cell
             assert!(
                 cells != prev_cells || screen.col == 4,
-                "{mode:?}: cursor at char {col} is drawn where char {} was",
+                "{mode:?} {text:?}: cursor at char {col} is drawn where char {} was",
                 col - 1,
             );
             prev_cells = cells;
@@ -638,13 +682,14 @@ fn word_wrap_cursor_on_a_wide_whitespace_across_the_right_edge_is_drawn() {
         let buf = render_buffer(&textarea, 3, 3);
         assert_eq!(cursor_cells(&buf), [(2, 0)], "{alignment:?}");
 
-        // The cursor at the end of a line that ends with it too
+        // A line that ends with it does not hang it but starts the next row with it, and the cursor at its end is
+        // drawn after it there
         let mut textarea = TextArea::from(["ab\u{3000}"]);
         textarea.set_wrap_mode(WrapMode::Word);
         textarea.set_alignment(alignment);
         textarea.move_cursor(CursorMove::End);
         let buf = render_buffer(&textarea, 3, 3);
-        assert_eq!(cursor_cells(&buf), [(2, 0)], "{alignment:?}");
+        assert_eq!(cursor_cells(&buf), [(2, 1)], "{alignment:?}");
     }
 }
 

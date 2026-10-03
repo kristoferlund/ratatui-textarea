@@ -121,6 +121,7 @@ fn wrap_word_chunks(
         return vec![(0, 0)];
     }
 
+    let trailing_whitespace_start = line.trim_end_matches(char::is_whitespace).len();
     let mut out = Vec::new();
     let mut seg_start = 0usize;
     let mut seg_end = 0usize;
@@ -135,21 +136,27 @@ fn wrap_word_chunks(
 
         // Whitespace at a break stays on the row before it, so that a row never starts with the space that separates
         // it from the previous one. What fits is drawn, and at most one character hangs past the right edge, where it
-        // is not drawn. Any more starts the next row, so that only the last character of a full row, the whitespace
-        // hung after it and the end of the line after that share a cell, the last one of the row.
+        // is not drawn. Any more starts the next row, so that only the last character of a full row and the whitespace
+        // hung after it, or the end of the line, share a cell, the last one of the row.
         // A tab hangs like a space, whatever its width, since nothing past the edge is drawn.
+        // Whitespace that ends the line is not at a break and does not hang: what does not fit starts the next row, so
+        // that a space typed after a word that fills its row moves the cursor.
         if text.chars().all(char::is_whitespace) {
+            let trailing = chunk.start >= trailing_whitespace_start;
             for (offset, c) in text.char_indices() {
-                if hung {
+                let end = offset + c.len_utf8();
+                let c_text = &text[offset..end];
+                let overflows =
+                    seg_end > seg_start && display_width_to(c_text, seg_width, tab_len) > width;
+                if hung || (trailing && overflows) {
                     out.push((seg_start, seg_end));
                     seg_start = seg_end;
                     seg_width = 0;
                     closed = false;
                 }
-                let end = offset + c.len_utf8();
-                seg_width = display_width_to(&text[offset..end], seg_width, tab_len);
+                seg_width = display_width_to(c_text, seg_width, tab_len);
                 seg_end = chunk.start + end;
-                hung = seg_width > width;
+                hung = !trailing && seg_width > width;
             }
             continue;
         }
@@ -346,6 +353,30 @@ mod tests {
 
         let have = segments("helloworld x", WrapMode::WordOrGlyph, 4);
         assert_eq!(have, vec!["hell", "owor", "ld ", "x"]);
+    }
+
+    #[test]
+    fn word_wrap_starts_the_next_row_with_whitespace_that_ends_the_line() {
+        for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+            // Nothing follows it, so it does not hang but wraps, and the end of the line gets a cell of its own
+            let have = segments("hello ", mode, 5);
+            assert_eq!(have, vec!["hello", " "], "{mode:?}");
+            let have = segments("hello  ", mode, 5);
+            assert_eq!(have, vec!["hello", "  "], "{mode:?}");
+            let have = segments("aaaa bbbb ", mode, 4);
+            assert_eq!(have, vec!["aaaa ", "bbbb", " "], "{mode:?}");
+            let have = segments("aaa\t", mode, 3);
+            assert_eq!(have, vec!["aaa", "\t"], "{mode:?}");
+
+            // What fits stays on the row
+            let have = segments("aa   ", mode, 4);
+            assert_eq!(have, vec!["aa  ", " "], "{mode:?}");
+        }
+
+        let have = segments("helloworld ", WrapMode::Word, 4);
+        assert_eq!(have, vec!["helloworld", " "]);
+        let have = segments("helloworld ", WrapMode::WordOrGlyph, 4);
+        assert_eq!(have, vec!["hell", "owor", "ld "]);
     }
 
     #[test]
