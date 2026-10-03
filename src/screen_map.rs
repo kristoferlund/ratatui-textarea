@@ -82,20 +82,22 @@ impl TextArea<'_> {
             .collect()
     }
 
+    fn wrap_width(&self) -> Option<usize> {
+        if self.wrap_mode() == WrapMode::None {
+            return None;
+        }
+        let width = self.area.get().width;
+        if width == 0 {
+            return None;
+        }
+        let line_number_len = self
+            .line_number_style()
+            .map(|_| num_digits(self.lines.len()));
+        Some(effective_wrap_width(width, line_number_len))
+    }
+
     pub(crate) fn screen_map_load(&self) {
-        let wrap_width = if self.wrap_mode() != WrapMode::None {
-            let width = self.area.get().width;
-            if width > 0 {
-                let line_number_len = self
-                    .line_number_style()
-                    .map(|_| num_digits(self.lines.len()));
-                Some(effective_wrap_width(width, line_number_len))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let wrap_width = self.wrap_width();
 
         let rows = match wrap_width {
             Some(width) => wrapped_rows(&self.lines, self.wrap_mode(), width, self.tab_length()),
@@ -165,6 +167,19 @@ impl TextArea<'_> {
             &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
         let char_offset = char_offset_for_screen_col(fragment, screen.col, self.tab_length());
         DataCursor(line.wrapped.row, line.wrapped.start_col + char_offset)
+    }
+
+    // A column past the right edge of a row that is not the last of its line is on the character that hangs there,
+    // such as the whitespace at a word wrap break, since that character is drawn in the last cell of the row. Any
+    // other column is left as it is.
+    pub(crate) fn clamp_col_to_hung_char(&self, row: usize, col: usize) -> usize {
+        let line = self.screen_line(row);
+        match self.wrap_width() {
+            Some(width) if !line.wrapped.last_in_row && line.screen_width > width => {
+                col.min(line.cursor_max_col)
+            }
+            _ => col,
+        }
     }
 
     pub(crate) fn array_to_screen(&self, array: DataCursor) -> ScreenCursor {

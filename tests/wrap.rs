@@ -647,3 +647,45 @@ fn word_wrap_cursor_on_a_wide_whitespace_across_the_right_edge_is_drawn() {
         assert_eq!(cursor_cells(&buf), [(2, 0)], "{alignment:?}");
     }
 }
+
+#[test]
+fn word_wrap_click_right_of_a_row_lands_on_its_hung_whitespace() {
+    for mode in [WrapMode::Word, WrapMode::WordOrGlyph] {
+        // The whitespace hung past the right edge is drawn in the last cell, so a column past the row lands on it, on
+        // the same row, and not after it on the next row
+        let mut textarea = TextArea::from(["aaaa bbbb"]);
+        textarea.set_wrap_mode(mode);
+        render(&textarea, 4, 4);
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
+
+        let mut textarea = TextArea::from(["aa        bb"]);
+        textarea.set_wrap_mode(mode);
+        render(&textarea, 4, 4);
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
+        assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 9), "{mode:?}");
+
+        // A whitespace that fits is drawn on its row, and a column past it is the insertion point after it
+        let mut textarea = TextArea::from(["aaa bbbb"]);
+        textarea.set_wrap_mode(mode);
+        render(&textarea, 4, 4);
+        assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4), "{mode:?}");
+    }
+
+    // A wide whitespace across the right edge hangs too
+    let mut textarea = TextArea::from(["ab\u{3000}cd"]);
+    textarea.set_wrap_mode(WrapMode::Word);
+    render(&textarea, 3, 4);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 2));
+    assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 5));
+}
+
+#[test]
+fn glyph_wrap_click_right_of_a_row_is_its_exclusive_end() {
+    // Nothing hangs, so a column past the row is the insertion point after its last character
+    let mut textarea = TextArea::from(["aaaabbbb"]);
+    textarea.set_wrap_mode(WrapMode::Glyph);
+    render(&textarea, 4, 4);
+    assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4));
+    assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 8));
+}
