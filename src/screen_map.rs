@@ -2,6 +2,7 @@ use crate::cursor::{DataCursor, ScreenCursor};
 use crate::textarea::TextArea;
 use crate::util::num_digits;
 use crate::wrap::{WrapMode, WrappedLine, effective_wrap_width, wrapped_rows};
+use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy)]
@@ -62,18 +63,45 @@ fn char_offset_for_screen_col(
     tab_len: u8,
     mask: Option<char>,
 ) -> usize {
+    let chars = text.char_indices().map(|(i, c)| &text[i..i + c.len_utf8()]);
+    offset_for_screen_col(chars, screen_col, tab_len, mask)
+}
+
+// Steps over whole grapheme clusters, so that the offset never falls between a character and its combining marks.
+// With a mask every character is drawn as a mask glyph of its own, so it steps over characters.
+fn grapheme_offset_for_screen_col(
+    text: &str,
+    screen_col: usize,
+    tab_len: u8,
+    mask: Option<char>,
+) -> usize {
+    if mask.is_some() {
+        return char_offset_for_screen_col(text, screen_col, tab_len, mask);
+    }
+    offset_for_screen_col(text.graphemes(true), screen_col, tab_len, mask)
+}
+
+// The offset in chars of the first of `units` that covers or follows `screen_col`
+fn offset_for_screen_col<'a>(
+    units: impl Iterator<Item = &'a str>,
+    screen_col: usize,
+    tab_len: u8,
+    mask: Option<char>,
+) -> usize {
     let mut col = 0usize;
     let mut chars = 0usize;
-    for c in text.chars() {
+    for unit in units {
         if col >= screen_col {
             break;
         }
-        let width = char_display_width(c, col, tab_len, mask);
-        if col + width > screen_col {
+        let end = unit.chars().fold(col, |col, c| {
+            col + char_display_width(c, col, tab_len, mask)
+        });
+        if end > screen_col {
             break;
         }
-        col += width;
-        chars += 1;
+        col = end;
+        chars += unit.chars().count();
     }
     chars
 }
@@ -201,6 +229,17 @@ impl TextArea<'_> {
             }
             _ => col,
         }
+    }
+
+    // The hit test behind `TextArea::screen_to_data`. Unlike `screen_to_array`, it lands on whole grapheme clusters
+    // only, or with a mask on every character, each drawn as a mask glyph of its own.
+    pub(crate) fn screen_to_data_cursor(&self, row: usize, col: usize) -> DataCursor {
+        let line = self.screen_line(row);
+        let fragment =
+            &self.lines[line.wrapped.row][line.wrapped.start_byte..line.wrapped.end_byte];
+        let offset =
+            grapheme_offset_for_screen_col(fragment, col, self.tab_length(), self.mask_char());
+        DataCursor(line.wrapped.row, line.wrapped.start_col + offset)
     }
 
     pub(crate) fn array_to_screen(&self, array: DataCursor) -> ScreenCursor {

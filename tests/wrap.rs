@@ -689,3 +689,28 @@ fn glyph_wrap_click_right_of_a_row_is_its_exclusive_end() {
     assert_eq!(textarea.screen_to_data(0, 99), DataCursor(0, 4));
     assert_eq!(textarea.screen_to_data(1, 99), DataCursor(0, 8));
 }
+
+#[test]
+fn word_wrap_masked_hung_space_is_measured_by_the_mask() {
+    // Every char is drawn as the wide mask, so the space after "ab" starts in the last cell and hangs across the edge.
+    // The row is drawn without it, which leaves the last cell free unless it is aligned right, where the cursor goes
+    // on the whole wide char drawn in the last cell.
+    for (alignment, cell) in [
+        (Alignment::Left, (4, 0)),
+        (Alignment::Center, (4, 0)),
+        (Alignment::Right, (3, 0)),
+    ] {
+        let mut textarea = TextArea::from(["ab cd"]);
+        textarea.set_mask_char('\u{4e2d}');
+        textarea.set_wrap_mode(WrapMode::Word);
+        textarea.set_alignment(alignment);
+        textarea.move_cursor(CursorMove::Jump(0, 2));
+        let buf = render_buffer(&textarea, 5, 3);
+        assert_eq!(cursor_cells(&buf), [cell], "{alignment:?}");
+        assert_eq!(
+            textarea.screen_to_data(0, 99),
+            DataCursor(0, 2),
+            "{alignment:?}"
+        );
+    }
+}

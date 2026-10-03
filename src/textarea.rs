@@ -2279,7 +2279,9 @@ impl<'a> TextArea<'a> {
     /// the end of a line resolves to its end. A column past the right edge
     /// of a soft-wrapped row resolves to the whitespace hung there at a word
     /// wrap break, if any. A click below or to the right of the text
-    /// therefore lands where a reader would expect.
+    /// therefore lands where a reader would expect. The position returned
+    /// never falls inside a grapheme cluster, such as between a letter and
+    /// its combining accent.
     /// ```
     /// use ratatui_textarea::{CursorMove, DataCursor, TextArea};
     ///
@@ -2299,12 +2301,7 @@ impl<'a> TextArea<'a> {
         // map, so the bound is checked here, at the public boundary.
         let row = row.min(self.screen_lines_count().saturating_sub(1));
         let col = self.clamp_col_to_hung_char(row, col);
-        self.screen_to_array(ScreenCursor {
-            row,
-            col,
-            char: None,
-            dc: None,
-        })
+        self.screen_to_data_cursor(row, col)
     }
 
     /// Get the current selection range as a pair of the start position and the end position. The range is bounded
