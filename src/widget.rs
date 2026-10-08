@@ -168,7 +168,7 @@ impl<'a> TextArea<'a> {
         // Scrolling right brings the whole char under the cursor into view, not just its
         // first column. A char wider than the viewport keeps its first column in view.
         // A masked line draws the mask char, so that is the char whose width counts.
-        let glyph = self.mask_char().or(screen.char);
+        let glyph = screen.char.map(|c| self.mask_char().unwrap_or(c));
         let glyph_width = glyph.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
         let right = cursor + glyph_width - 1;
         next_scroll_top(next_scroll_top(prev_top, right, width), cursor, width)
