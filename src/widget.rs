@@ -94,8 +94,9 @@ fn next_scroll_top(prev_top: u16, cursor: u16, len: u16) -> u16 {
     }
 }
 
-// Cut the columns `left..left + width` out of a line. A wide character cut by either edge is drawn as blank cells in
-// its own style, so everything else stays in its column and a cursor on that character is still drawn.
+// Cut the columns `left..left + width` out of a line. A wide char cut by either edge
+// becomes blank cells in its own style, so the other cells keep their columns and a
+// cursor on that char is still drawn.
 fn clip_line(line: Line<'_>, left: usize, width: usize) -> Line<'_> {
     if left == 0 && line.width() <= width {
         return line;
@@ -106,7 +107,12 @@ fn clip_line(line: Line<'_>, left: usize, width: usize) -> Line<'_> {
     let mut spans = Vec::with_capacity(line.spans.len());
     for span in line.spans {
         let mut text = String::new();
-        for grapheme in span.content.graphemes(true) {
+        // Ratatui draws no control chars, so they take no columns here either.
+        for grapheme in span
+            .content
+            .graphemes(true)
+            .filter(|g| !g.contains(char::is_control))
+        {
             let start = col;
             col += grapheme.width();
             if left <= start && col <= right {
@@ -132,8 +138,9 @@ impl<'a> TextArea<'a> {
         for row in &screen_lines[top_row..bottom_row] {
             let line = &self.lines()[row.wrapped.row];
             let mut spans = self.line_spans_segment(line, &row.wrapped, lnum_len);
-            // Scrolled here, not by `Paragraph::scroll`, which draws a wide character cut by the left edge whole and
-            // drops one cut by the right edge. Like that scroll, only left-aligned text is scrolled.
+            // Scroll here, not with `Paragraph::scroll`, which draws a wide char cut by the left
+            // edge whole and drops one cut by the right edge. Like that scroll, only left-aligned
+            // text is scrolled.
             if self.alignment() == Alignment::Left {
                 spans = clip_line(spans, top_col.into(), width.into());
             }
@@ -158,14 +165,13 @@ impl<'a> TextArea<'a> {
                 cursor += lnum; // The cursor position is shifted by the line number part
             };
         }
-        // Scrolling right keeps the whole char under the cursor in view, not just its first column, unless it is wider
-        // than the viewport
-        let glyph_width = screen.char.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
+        // Scrolling right brings the whole char under the cursor into view, not just its
+        // first column. A char wider than the viewport keeps its first column in view.
+        // A masked line draws the mask char, so that is the char whose width counts.
+        let glyph = self.mask_char().or(screen.char);
+        let glyph_width = glyph.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
         let right = cursor + glyph_width - 1;
-        if prev_top <= cursor && prev_top + width <= right {
-            return (right + 1 - width).min(cursor);
-        }
-        next_scroll_top(prev_top, cursor, width)
+        next_scroll_top(next_scroll_top(prev_top, right, width), cursor, width)
     }
 }
 

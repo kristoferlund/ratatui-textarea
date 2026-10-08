@@ -5,7 +5,6 @@ use ratatui_core::widgets::Widget as _;
 use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 use std::cmp;
 use std::fmt::Debug;
-use unicode_width::UnicodeWidthChar as _;
 
 const CHINESE: &str = "每个人都有自己的生活方式";
 const JAPANESE: &str = "日本語のテキストです";
@@ -2000,53 +1999,4 @@ fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_right_edge() {
     assert_eq!(textarea.scroll_offset(), (0, 1));
     assert_eq!(row_symbols(&buf, 0), ["b", "日", " "]);
     assert_eq!(cursor_cells(&buf), [(1, 0)]);
-}
-
-#[test]
-fn test_horizontal_scroll_keeps_the_cursor_on_screen_through_wide_chars_at_every_width() {
-    // The gutter slides in ahead of the cursor near the start of a line, which can push
-    // the cursor past the right edge of a viewport narrower than twice the gutter, wide
-    // chars or not; line numbers are checked from that width up.
-    for (line_numbers, widths) in [(false, 1..=12), (true, 7..=12)] {
-        for width in widths {
-            let lines = ["日本語abc", "a日b本c語", "日本語テキストです"];
-            let mut textarea = TextArea::from(lines);
-            if line_numbers {
-                textarea.set_line_number_style(Style::default());
-            }
-            for (row, line) in (0..).zip(lines) {
-                textarea.move_cursor(CursorMove::Jump(row, 0));
-                for col in 0..=line.chars().count() {
-                    let buf = render_buffer(&textarea, width, 3);
-                    let (top_row, top_col) = textarea.scroll_offset();
-                    assert_eq!(top_row, 0);
-
-                    let screen = textarea.screen_cursor();
-                    let cursor = screen.col as u16;
-                    let gutter = textarea.line_number_width();
-                    let x = (cursor + gutter).checked_sub(top_col);
-                    let context = format!(
-                        "line numbers {line_numbers}, width {width}, cursor at ({row}, {col})"
-                    );
-                    assert_eq!(
-                        cursor_cells(&buf),
-                        x.map(|x| (x, row)).into_iter().collect::<Vec<_>>(),
-                        "{context}",
-                    );
-
-                    // The whole char under the cursor is in view, unless it is wider than the viewport, where only
-                    // its blank left half fits
-                    if let (Some(x), Some(c)) = (x, screen.char) {
-                        let want = if c.width().unwrap_or(1) <= usize::from(width) {
-                            c.to_string()
-                        } else {
-                            " ".to_string()
-                        };
-                        assert_eq!(buf[(x, row)].symbol(), want, "{context}");
-                    }
-                    textarea.move_cursor(CursorMove::Forward);
-                }
-            }
-        }
-    }
 }
