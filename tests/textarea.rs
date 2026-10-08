@@ -1955,9 +1955,9 @@ fn rendered_rows(textarea: &TextArea<'_>, width: u16, height: u16) -> Vec<String
 
 #[test]
 fn test_mask_measures_screen_positions_by_the_mask_not_the_text() {
-    // Five wide chars are ten cells of text but five cells of mask. Scrolling and
-    // the cursor must follow the five cells that are actually drawn, otherwise the
-    // viewport slides past the mask and the field goes blank — and leaks that the
+    // Ten wide chars are twenty cells of text but ten cells of mask. Scrolling and
+    // the cursor must follow the ten cells that are actually drawn, otherwise the
+    // viewport slides past the mask and the field goes blank, and leaks that the
     // secret is made of wide chars.
     let mut textarea = TextArea::from([JAPANESE]);
     textarea.set_mask_char('*');
@@ -1989,7 +1989,32 @@ fn test_mask_takes_its_own_width() {
 
     assert_eq!(textarea.screen_cursor().col, 6);
     let rows = rendered_rows(&textarea, 3, 1);
-    // A full-width mask char, the cell it spills into, then the cursor
+    // A full-width mask char, the cell it spills into, then the cursor.
     assert_eq!(rows, ["＊  "]);
     assert_eq!(textarea.scroll_offset(), (0, 4));
+}
+
+#[test]
+fn test_mask_round_trips_every_position_and_clears() {
+    for mode in [
+        WrapMode::None,
+        WrapMode::Glyph,
+        WrapMode::Word,
+        WrapMode::WordOrGlyph,
+    ] {
+        let mut textarea = TextArea::from([JAPANESE, "a\tb", "混合 mixed"]);
+        textarea.set_wrap_mode(mode);
+        textarea.set_mask_char('＊');
+        rendered(&textarea, 16, 20);
+
+        assert_round_trips_every_position(&mut textarea, mode);
+    }
+
+    // Clearing the mask measures the text by its own widths again.
+    let mut textarea = TextArea::from([JAPANESE]);
+    textarea.set_mask_char('*');
+    textarea.move_cursor(CursorMove::End);
+    assert_eq!(textarea.screen_cursor().col, JAPANESE.chars().count());
+    textarea.clear_mask_char();
+    assert_eq!(textarea.screen_cursor().col, 2 * JAPANESE.chars().count());
 }

@@ -22,8 +22,8 @@ fn is_pure_ascii(line: &str) -> bool {
     line.is_ascii() && !line.contains('\t')
 }
 
-// Every character is drawn as the mask character when a mask is set, so the width on screen is the mask's width
 fn char_display_width(c: char, col: usize, tab_len: u8, mask: Option<char>) -> usize {
+    // A masked line is drawn as one mask character per char, so each char is as wide as the mask.
     if let Some(mask) = mask {
         mask.width().unwrap_or(0)
     } else if c == '\t' {

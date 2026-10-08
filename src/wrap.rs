@@ -233,9 +233,10 @@ fn display_width_from(text: &str, start_width: usize, tab_len: u8, mask: Option<
     display_width_to(text, start_width, tab_len, mask).saturating_sub(start_width)
 }
 
-// Every character is drawn as the mask character when a mask is set, so the width on screen is the mask's width
 fn display_width_to(text: &str, mut width: usize, tab_len: u8, mask: Option<char>) -> usize {
     for c in text.chars() {
+        // A masked line is drawn as one mask character per char,
+        // so each char is as wide as the mask.
         if let Some(mask) = mask {
             width += mask.width().unwrap_or(0);
         } else if c == '\t' {
@@ -309,7 +310,7 @@ mod tests {
     fn mask_wraps_by_the_mask_width() {
         let have = masked_segments("a中\tcde", WrapMode::Glyph, 4, '*');
         assert_eq!(have, vec!["a中\tc", "de"]);
-        let have = masked_segments("ab cd", WrapMode::Word, 4, '＊');
-        assert_eq!(have, vec!["ab", " ", "cd"]);
+        let have = masked_segments("abcd", WrapMode::WordOrGlyph, 4, '＊');
+        assert_eq!(have, vec!["ab", "cd"]);
     }
 }
