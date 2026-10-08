@@ -1681,7 +1681,7 @@ impl<'a> TextArea<'a> {
                 .filter_map(|(start, end)| {
                     let start = cmp::max(start, wrapped.start_byte);
                     let end = cmp::min(end, wrapped.end_byte);
-                    (start < end).then_some((start - wrapped.start_byte, end - wrapped.start_byte))
+                    (start < end).then(|| (start - wrapped.start_byte, end - wrapped.start_byte))
                 })
                 .collect::<Vec<_>>();
             if !clipped.is_empty() {
