@@ -1760,6 +1760,68 @@ fn test_scroll_offset_tracks_the_viewport() {
     assert!(row > 0, "scrolling down must move the viewport, got {row}");
 }
 
+fn render_buffer(textarea: &TextArea<'_>, width: u16, height: u16) -> Buffer {
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width,
+        height,
+    };
+    let mut buf = Buffer::empty(area);
+    textarea.render(area, &mut buf);
+    buf
+}
+
+fn row_symbols(buf: &Buffer, y: u16) -> Vec<&str> {
+    (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect()
+}
+
+fn cursor_cells(buf: &Buffer) -> Vec<(u16, u16)> {
+    let area = buf.area;
+    (0..area.height)
+        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+        .filter(|&pos| buf[pos].modifier.contains(Modifier::REVERSED))
+        .collect()
+}
+
+#[test]
+fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_left_edge() {
+    let mut textarea = TextArea::from(["日本語abc"]);
+    textarea.move_cursor(CursorMove::End);
+
+    // The viewport starts on the right half of 語. That half is drawn blank, so
+    // the rest of the row stays in its own columns and the cursor stays on screen.
+    let buf = render_buffer(&textarea, 5, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 5));
+    assert_eq!(row_symbols(&buf, 0), [" ", "a", "b", "c", " "]);
+    assert_eq!(cursor_cells(&buf), [(4, 0)]);
+
+    textarea.insert_char('x');
+    let buf = render_buffer(&textarea, 5, 1);
+    assert_eq!(row_symbols(&buf, 0), ["a", "b", "c", "x", " "]);
+    assert_eq!(cursor_cells(&buf), [(4, 0)]);
+}
+
+#[test]
+fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_right_edge() {
+    let mut textarea = TextArea::from(["ab日本"]);
+    textarea.move_cursor(CursorMove::Jump(0, 1));
+
+    // 日 spans columns 2 and 3 but only column 2 is on screen, so it is drawn as a
+    // blank cell.
+    let buf = render_buffer(&textarea, 3, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 0));
+    assert_eq!(row_symbols(&buf, 0), ["a", "b", " "]);
+    assert_eq!(cursor_cells(&buf), [(1, 0)]);
+
+    // Moving the cursor onto it scrolls the whole of it into view.
+    textarea.move_cursor(CursorMove::Forward);
+    let buf = render_buffer(&textarea, 3, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 1));
+    assert_eq!(row_symbols(&buf, 0), ["b", "日", " "]);
+    assert_eq!(cursor_cells(&buf), [(1, 0)]);
+}
+
 #[test]
 fn test_screen_to_data_maps_positions_and_clamps_outside_the_text() {
     let textarea = TextArea::from(["hello", "hi"]);
@@ -1937,66 +1999,4 @@ fn test_screen_to_data_composes_with_the_gutter_and_scroll_offset_for_wide_chars
     let row = usize::from(top_row);
     let col = 2 + usize::from(top_col);
     assert_eq!(textarea.screen_to_data(row, col), DataCursor(8, 1));
-}
-
-fn render_buffer(textarea: &TextArea<'_>, width: u16, height: u16) -> Buffer {
-    let area = Rect {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    };
-    let mut buf = Buffer::empty(area);
-    textarea.render(area, &mut buf);
-    buf
-}
-
-fn row_symbols(buf: &Buffer, y: u16) -> Vec<&str> {
-    (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect()
-}
-
-fn cursor_cells(buf: &Buffer) -> Vec<(u16, u16)> {
-    let area = buf.area;
-    (0..area.height)
-        .flat_map(|y| (0..area.width).map(move |x| (x, y)))
-        .filter(|&pos| buf[pos].modifier.contains(Modifier::REVERSED))
-        .collect()
-}
-
-#[test]
-fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_left_edge() {
-    let mut textarea = TextArea::from(["日本語abc"]);
-    textarea.move_cursor(CursorMove::End);
-
-    // The viewport starts on the right half of 語. That half is drawn blank, so
-    // the rest of the row stays in its own columns and the cursor stays on screen.
-    let buf = render_buffer(&textarea, 5, 1);
-    assert_eq!(textarea.scroll_offset(), (0, 5));
-    assert_eq!(row_symbols(&buf, 0), [" ", "a", "b", "c", " "]);
-    assert_eq!(cursor_cells(&buf), [(4, 0)]);
-
-    textarea.insert_char('x');
-    let buf = render_buffer(&textarea, 5, 1);
-    assert_eq!(row_symbols(&buf, 0), ["a", "b", "c", "x", " "]);
-    assert_eq!(cursor_cells(&buf), [(4, 0)]);
-}
-
-#[test]
-fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_right_edge() {
-    let mut textarea = TextArea::from(["ab日本"]);
-    textarea.move_cursor(CursorMove::Jump(0, 1));
-
-    // 日 spans columns 2 and 3 but only column 2 is on screen, so it is drawn as a
-    // blank cell.
-    let buf = render_buffer(&textarea, 3, 1);
-    assert_eq!(textarea.scroll_offset(), (0, 0));
-    assert_eq!(row_symbols(&buf, 0), ["a", "b", " "]);
-    assert_eq!(cursor_cells(&buf), [(1, 0)]);
-
-    // Moving the cursor onto it scrolls the whole of it into view.
-    textarea.move_cursor(CursorMove::Forward);
-    let buf = render_buffer(&textarea, 3, 1);
-    assert_eq!(textarea.scroll_offset(), (0, 1));
-    assert_eq!(row_symbols(&buf, 0), ["b", "日", " "]);
-    assert_eq!(cursor_cells(&buf), [(1, 0)]);
 }
