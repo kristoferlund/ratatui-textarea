@@ -1823,6 +1823,19 @@ fn test_horizontal_scroll_blanks_a_wide_char_cut_by_the_right_edge() {
 }
 
 #[test]
+fn test_horizontal_scroll_counts_halfwidth_sound_marks() {
+    // Each ｶﾞ is one grapheme two cells wide, as ratatui draws it, though unicode-width
+    // gives ﾞ no width. The viewport starts on the right half of the last one.
+    let mut textarea = TextArea::from(["ｶﾞｶﾞｶﾞabc"]);
+    textarea.move_cursor(CursorMove::End);
+
+    let buf = render_buffer(&textarea, 5, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 5));
+    assert_eq!(row_symbols(&buf, 0), [" ", "a", "b", "c", " "]);
+    assert_eq!(cursor_cells(&buf), [(4, 0)]);
+}
+
+#[test]
 fn test_screen_to_data_maps_positions_and_clamps_outside_the_text() {
     let textarea = TextArea::from(["hello", "hi"]);
     rendered(&textarea, 16, 4);

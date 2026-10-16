@@ -1,9 +1,9 @@
 use crate::textarea::TextArea;
-use crate::util::num_digits;
+use crate::util::{char_width, num_digits};
 use crate::wrap::WrapMode;
 #[cfg(feature = "portable-atomic")]
 use portable_atomic::{AtomicU64, Ordering};
-use ratatui_core::buffer::Buffer;
+use ratatui_core::buffer::{Buffer, CellWidth as _};
 use ratatui_core::layout::{Alignment, Rect};
 use ratatui_core::text::{Line, Span, Text};
 use ratatui_core::widgets::Widget;
@@ -12,7 +12,6 @@ use std::cmp;
 #[cfg(not(feature = "portable-atomic"))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use unicode_segmentation::UnicodeSegmentation as _;
-use unicode_width::{UnicodeWidthChar as _, UnicodeWidthStr as _};
 
 // &mut 'a (u16, u16, u16, u16) is not available since `render` method takes immutable reference of TextArea
 // instance. In the case, the TextArea instance cannot be accessed from any other objects since it is mutablly
@@ -94,27 +93,39 @@ fn next_scroll_top(prev_top: u16, cursor: u16, len: u16) -> u16 {
     }
 }
 
+// The graphemes of a span that ratatui draws, with their widths in cells. Ratatui draws no
+// control chars, so they take no columns here either.
+fn drawn_graphemes<'s>(span: &'s Span<'_>) -> impl Iterator<Item = (&'s str, usize)> {
+    span.content
+        .graphemes(true)
+        .filter(|g| !g.contains(char::is_control))
+        .map(|g| (g, g.cell_width().into()))
+}
+
 // Cut the columns `left..left + width` out of a line. A wide char cut by either edge
 // becomes blank cells in its own style, so the other cells keep their columns and a
 // cursor on that char is still drawn.
 fn clip_line(line: Line<'_>, left: usize, width: usize) -> Line<'_> {
-    if left == 0 && line.width() <= width {
+    // `Line::width` gives no cells to the halfwidth sound marks ﾞ and ﾟ, so count the cells
+    // ratatui draws.
+    let line_width: usize = line
+        .spans
+        .iter()
+        .flat_map(drawn_graphemes)
+        .map(|(_, w)| w)
+        .sum();
+    if left == 0 && line_width <= width {
         return line;
     }
 
     let right = left + width;
     let mut col = 0;
     let mut spans = Vec::with_capacity(line.spans.len());
-    for span in line.spans {
+    for span in &line.spans {
         let mut text = String::new();
-        // Ratatui draws no control chars, so they take no columns here either.
-        for grapheme in span
-            .content
-            .graphemes(true)
-            .filter(|g| !g.contains(char::is_control))
-        {
+        for (grapheme, grapheme_width) in drawn_graphemes(span) {
             let start = col;
-            col += grapheme.width();
+            col += grapheme_width;
             if left <= start && col <= right {
                 text.push_str(grapheme);
             } else if start < right && left < col {
@@ -169,7 +180,7 @@ impl<'a> TextArea<'a> {
         // first column. A char wider than the viewport keeps its first column in view.
         // A masked line draws the mask char, so that is the char whose width counts.
         let glyph = screen.char.map(|c| self.mask_char().unwrap_or(c));
-        let glyph_width = glyph.and_then(|c| c.width()).unwrap_or(1).max(1) as u16;
+        let glyph_width = glyph.map_or(1, char_width).max(1) as u16;
         let right = cursor + glyph_width - 1;
         next_scroll_top(next_scroll_top(prev_top, right, width), cursor, width)
     }
