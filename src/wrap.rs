@@ -1,9 +1,9 @@
+use crate::util::char_width;
 #[cfg(feature = "arbitrary")]
 use arbitrary::Arbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
 /// Specify how logical lines are soft-wrapped at render time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -238,7 +238,7 @@ fn display_width_to(text: &str, mut width: usize, tab_len: u8, mask: Option<char
         // A masked line is drawn as one mask character per char,
         // so each char is as wide as the mask.
         if let Some(mask) = mask {
-            width += mask.width().unwrap_or(0);
+            width += char_width(mask);
         } else if c == '\t' {
             if tab_len > 0 {
                 let tab = tab_len as usize;
@@ -246,7 +246,7 @@ fn display_width_to(text: &str, mut width: usize, tab_len: u8, mask: Option<char
                 width += pad;
             }
         } else {
-            width += c.width().unwrap_or(0);
+            width += char_width(c);
         }
     }
     width
@@ -312,5 +312,11 @@ mod tests {
         assert_eq!(have, vec!["a中\tc", "de"]);
         let have = masked_segments("abcd", WrapMode::WordOrGlyph, 4, '＊');
         assert_eq!(have, vec!["ab", "cd"]);
+    }
+
+    #[test]
+    fn halfwidth_sound_marks_take_a_cell() {
+        let have = segments("ｶﾞﾊﾟ", WrapMode::Glyph, 2);
+        assert_eq!(have, vec!["ｶﾞ", "ﾊﾟ"]);
     }
 }

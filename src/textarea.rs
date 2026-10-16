@@ -6,7 +6,7 @@ use crate::screen_map::{DataLine, ScreenLine};
 use crate::scroll::Scrolling;
 #[cfg(feature = "search")]
 use crate::search::Search;
-use crate::util::{Pos, num_digits, spaces};
+use crate::util::{Pos, char_width, num_digits, spaces};
 use crate::widget::Viewport;
 use crate::word::{find_word_exclusive_end_forward, find_word_start_backward};
 use crate::wrap::{WrapMode, WrappedLine};
@@ -19,7 +19,6 @@ use ratatui_widgets::block::Block;
 use std::cell::{Cell, RefCell};
 use std::cmp::{self, Ordering};
 use std::fmt;
-use unicode_width::UnicodeWidthChar as _;
 
 #[derive(Debug, Clone)]
 enum YankText {
@@ -1066,11 +1065,7 @@ impl<'a> TextArea<'a> {
         }
 
         let DataCursor(row, col) = self.cursor;
-        let width: usize = self.lines[row]
-            .chars()
-            .take(col)
-            .map(|c| c.width().unwrap_or(0))
-            .sum();
+        let width: usize = self.lines[row].chars().take(col).map(char_width).sum();
         let len = self.tab_len - (width % self.tab_len as usize) as u8;
         self.insert_piece(spaces(len).to_string())
     }

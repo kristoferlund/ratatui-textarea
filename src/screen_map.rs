@@ -1,8 +1,7 @@
 use crate::cursor::{DataCursor, ScreenCursor};
 use crate::textarea::TextArea;
-use crate::util::num_digits;
+use crate::util::{char_width, num_digits};
 use crate::wrap::{WrapMode, WrappedLine, effective_wrap_width, wrapped_rows};
-use unicode_width::UnicodeWidthChar;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ScreenLine {
@@ -25,13 +24,13 @@ fn is_pure_ascii(line: &str) -> bool {
 fn char_display_width(c: char, col: usize, tab_len: u8, mask: Option<char>) -> usize {
     // A masked line is drawn as one mask character per char, so each char is as wide as the mask.
     if let Some(mask) = mask {
-        mask.width().unwrap_or(0)
+        char_width(mask)
     } else if c == '\t' {
         let tab = tab_len.max(1) as usize;
         let pad = tab - (col % tab);
         pad.max(1)
     } else {
-        c.width().unwrap_or(0)
+        char_width(c)
     }
 }
 

@@ -2018,3 +2018,20 @@ fn test_mask_round_trips_every_position_and_clears() {
     textarea.clear_mask_char();
     assert_eq!(textarea.screen_cursor().col, 2 * JAPANESE.chars().count());
 }
+
+#[test]
+fn test_halfwidth_sound_marks_take_a_cell() {
+    // Ratatui draws ﾞ and ﾟ in a cell of their own, though unicode-width gives them no width.
+    let mut textarea = TextArea::from(["ｶﾞﾊﾟ"]);
+    textarea.move_cursor(CursorMove::End);
+    assert_eq!(textarea.screen_cursor().col, 4);
+
+    let rows = rendered_rows(&textarea, 3, 1);
+    assert_eq!(textarea.scroll_offset(), (0, 2));
+    // ﾊﾟ is one grapheme two cells wide, then the cell it spills into, then the cursor.
+    assert_eq!(rows, ["ﾊﾟ  "]);
+
+    // A sound mark as the mask char is as wide as it is drawn.
+    textarea.set_mask_char('ﾞ');
+    assert_eq!(textarea.screen_cursor().col, 4);
+}
